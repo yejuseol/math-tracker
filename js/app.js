@@ -367,8 +367,9 @@ function initApp() {
     document.getElementById('view-mode-section').style.display = '';
     document.querySelectorAll('.teacher-only').forEach(el => el.style.display = '');
   } else {
-    // student or parent: hide teacher controls and view-mode toggle entirely
-    document.getElementById('view-mode-section').style.display = 'none';
+    // student or parent: hide teacher controls and entire view-mode section
+    document.getElementById('view-mode-section').style.display   = 'none';
+    document.getElementById('student-select-wrap').style.display = 'none';
     document.querySelectorAll('.teacher-only').forEach(el => el.style.display = 'none');
   }
 
@@ -397,7 +398,7 @@ function setupFirestoreListeners() {
     }
 
     populateStudentSelects();
-    populateStudentViewSelect();
+    if (currentRole === 'teacher') populateStudentViewSelect();
     populateStatsFilter();
     renderStudents();
     renderDashboard();
@@ -822,27 +823,6 @@ function showResultCard(entry, st) {
 }
 
 // ── STUDENTS ───────────────────────────────────────────────────
-document.getElementById('btn-add-student').addEventListener('click', async () => {
-  const name        = document.getElementById('new-student-name').value.trim();
-  const school      = document.getElementById('new-student-school').value.trim();
-  const grade       = document.getElementById('new-student-grade').value;
-  const linkedEmail = document.getElementById('new-student-email').value.trim().toLowerCase();
-  const subjects    = Array.from(
-    document.querySelectorAll('#new-student-subjects input[type=checkbox]:checked')
-  ).map(cb => cb.value);
-  if (!name) return;
-  try {
-    await addDoc(collection(db, 'students'), {
-      name, school, grade, linkedEmail, subjects,
-      createdBy: currentUser.uid, createdAt: serverTimestamp()
-    });
-    document.getElementById('new-student-name').value    = '';
-    document.getElementById('new-student-school').value  = '';
-    document.getElementById('new-student-grade').value   = '';
-    document.getElementById('new-student-email').value   = '';
-    document.querySelectorAll('#new-student-subjects input[type=checkbox]').forEach(cb => cb.checked = false);
-  } catch (err) { alert('학생 추가 오류: ' + err.message); }
-});
 
 function initials(name) { return name.slice(0, 2).toUpperCase(); }
 
