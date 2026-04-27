@@ -282,14 +282,7 @@ document.getElementById('btn-signup').addEventListener('click', async () => {
     if (linkedChildEmail) profileData.linkedChildEmail = linkedChildEmail;
     await setDoc(doc(db, 'users', uid), profileData);
 
-    // Auto-create student record when role === 'student'
-    if (role === 'student') {
-      await addDoc(collection(db, 'students'), {
-        name, grade, linkedEmail: email,
-        school: '', subjects: [],
-        createdAt: serverTimestamp(), autoCreated: true
-      });
-    }
+    // Student doc is auto-created in onAuthStateChanged after profile is confirmed
   } catch (err) {
     errorEl.textContent = getAuthErrorMessage(err.code);
     btn.textContent = '회원가입'; btn.disabled = false;
@@ -306,10 +299,35 @@ document.getElementById('btn-logout').addEventListener('click', async () => {
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     currentUser = user;
-    const snap = await getDoc(doc(db, 'users', user.uid));
+
+    // Retry getting user profile up to 3 times (race with signup setDoc)
+    let snap;
+    for (let i = 0; i < 3; i++) {
+      snap = await getDoc(doc(db, 'users', user.uid));
+      if (snap.exists()) break;
+      await new Promise(r => setTimeout(r, 600));
+    }
     currentUserProfile = snap.exists()
       ? { uid: user.uid, ...snap.data() }
       : { uid: user.uid, name: user.email, role: 'student' };
+
+    // Auto-ensure student doc exists (handles signup race condition)
+    if (currentUserProfile.role === 'student') {
+      const email = user.email.toLowerCase();
+      const q = query(collection(db, 'students'), where('linkedEmail', '==', email));
+      const existing = await getDocs(q);
+      if (existing.empty) {
+        try {
+          await addDoc(collection(db, 'students'), {
+            name: currentUserProfile.name || email,
+            grade: currentUserProfile.grade || '',
+            linkedEmail: email,
+            school: '', subjects: [],
+            createdAt: serverTimestamp(), autoCreated: true
+          });
+        } catch (e) { console.warn('student doc create:', e.message); }
+      }
+    }
 
     document.getElementById('auth-screen').style.display = 'none';
     document.getElementById('app-gate').style.display    = 'flex';
