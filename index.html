@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mia's Math — Unit Test Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ── AUTH SCREEN ── -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <span class="brand-mark">M</span>
+      <div>
+        <div class="brand-title">Mia's Math</div>
+        <div class="brand-sub">Unit Test Tracker</div>
+      </div>
+    </div>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="auth-tab-login">로그인</button>
+      <button class="auth-tab" id="auth-tab-signup">회원가입</button>
+    </div>
+
+    <!-- LOGIN -->
+    <div id="auth-login-form">
+      <div class="field-group">
+        <label class="field-label">이메일</label>
+        <input type="email" id="login-email" placeholder="이메일 입력" autocomplete="email">
+      </div>
+      <div class="field-group">
+        <label class="field-label">비밀번호</label>
+        <input type="password" id="login-password" placeholder="비밀번호 입력" autocomplete="current-password">
+      </div>
+      <div class="auth-error" id="login-error"></div>
+      <button class="btn-primary auth-submit-btn" id="btn-login">로그인</button>
+    </div>
+
+    <!-- SIGNUP -->
+    <div id="auth-signup-form" style="display:none">
+      <div class="field-group">
+        <label class="field-label">이름 <span class="req">*</span></label>
+        <input type="text" id="signup-name" placeholder="이름 입력" autocomplete="name">
+      </div>
+      <div class="field-group">
+        <label class="field-label">이메일 <span class="req">*</span></label>
+        <input type="email" id="signup-email" placeholder="이메일 입력" autocomplete="email">
+      </div>
+      <div class="field-group">
+        <label class="field-label">비밀번호 <span class="req">*</span></label>
+        <input type="password" id="signup-password" placeholder="6자 이상" autocomplete="new-password">
+      </div>
+      <div class="field-group">
+        <label class="field-label">역할</label>
+        <select id="signup-role">
+          <option value="teacher">선생님 (Teacher)</option>
+          <option value="student">학생 (Student)</option>
+        </select>
+      </div>
+      <div class="auth-error" id="signup-error"></div>
+      <button class="btn-primary auth-submit-btn" id="btn-signup">회원가입</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── APP GATE (shown after login) ── -->
+<div id="app-gate" style="display:none">
+
+<!-- ── SIDEBAR ── -->
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <span class="brand-mark">M</span>
+    <div>
+      <div class="brand-title">Mia's Math</div>
+      <div class="brand-sub">Unit Test Tracker</div>
+    </div>
+  </div>
+
+  <div class="nav-section-label">메뉴</div>
+  <a class="nav-item active" data-view="dashboard" href="#">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5"/></svg>
+    대시보드
+  </a>
+  <a class="nav-item teacher-only" data-view="add-score" href="#">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5"/><line x1="8" y1="5" x2="8" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="5" y1="8" x2="11" y2="8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    점수 입력
+  </a>
+  <a class="nav-item teacher-only" data-view="students" href="#">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="6" cy="5" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M1 13c0-2.76 2.24-5 5-5s5 2.24 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="5" r="2" stroke="currentColor" stroke-width="1.5"/><path d="M14 13c0-1.86-.8-3.53-2.07-4.69" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    학생 관리
+  </a>
+  <a class="nav-item" data-view="stats" href="#">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><polyline points="1,12 5,7 8,10 11,5 15,8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    통계
+  </a>
+
+  <div class="nav-section-label" style="margin-top:auto">계정</div>
+  <div class="sidebar-user" id="sidebar-user">
+    <div class="user-avatar" id="user-avatar">—</div>
+    <div class="user-info">
+      <div class="user-name" id="user-name">—</div>
+      <div class="user-role" id="user-role">—</div>
+    </div>
+    <button class="btn-logout" id="btn-logout" title="로그아웃">⏻</button>
+  </div>
+
+  <div class="nav-section-label">뷰 모드</div>
+  <div class="role-toggle">
+    <button class="role-btn active" id="role-teacher">선생님</button>
+    <button class="role-btn" id="role-student">학생/학부모</button>
+  </div>
+  <div class="student-select-wrap" id="student-select-wrap" style="display:none">
+    <label class="field-label">학생 선택</label>
+    <select id="student-view-select"></select>
+  </div>
+</nav>
+
+<!-- ── MAIN ── -->
+<main class="main" id="main">
+
+  <!-- DASHBOARD -->
+  <div class="view active" id="view-dashboard">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">대시보드</h1>
+        <p class="page-sub" id="dash-sub">전체 학생 현황</p>
+      </div>
+      <button class="btn-primary teacher-only" data-view="add-score">+ 점수 입력</button>
+    </div>
+
+    <div class="stat-grid" id="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">전체 학생</div>
+        <div class="stat-num" id="stat-total-students">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">총 테스트 횟수</div>
+        <div class="stat-num" id="stat-total-tests">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">평균 성취도</div>
+        <div class="stat-num" id="stat-avg">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">76% 이상 비율</div>
+        <div class="stat-num" id="stat-pass">—</div>
+      </div>
+    </div>
+
+    <div class="section-title">최근 테스트 기록</div>
+    <div class="table-wrap">
+      <table id="recent-table">
+        <thead><tr>
+          <th>학생</th><th>챕터</th><th>날짜</th><th>점수</th><th>성취도</th><th>다음 스텝</th>
+        </tr></thead>
+        <tbody id="recent-tbody"></tbody>
+      </table>
+      <div class="empty-state" id="recent-empty">아직 입력된 점수가 없어요. 점수 입력 탭에서 시작하세요.</div>
+    </div>
+  </div>
+
+  <!-- ADD SCORE -->
+  <div class="view" id="view-add-score">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">점수 입력</h1>
+        <p class="page-sub">단원 테스트 결과를 기록합니다</p>
+      </div>
+    </div>
+
+    <div class="form-card">
+      <div class="form-tabs">
+        <button class="form-tab active" id="tab-total">총점 입력</button>
+        <button class="form-tab" id="tab-detail">문항별 정오 입력</button>
+      </div>
+
+      <!-- TOTAL MODE -->
+      <div id="form-total">
+        <div class="field-row">
+          <div class="field-group">
+            <label class="field-label">학생 <span class="req">*</span></label>
+            <select id="score-student"><option value="">학생 선택…</option></select>
+          </div>
+          <div class="field-group">
+            <label class="field-label">챕터 <span class="req">*</span></label>
+            <select id="score-chapter">
+              <option value="">챕터 선택…</option>
+              <option value="Ch.1">Ch.1 — Functions &amp; Linear</option>
+              <option value="Ch.2">Ch.2 — Systems &amp; Matrices</option>
+              <option value="Ch.3">Ch.3 — Factoring &amp; Polynomials</option>
+              <option value="Ch.4">Ch.4 — Quadratic Functions</option>
+              <option value="Ch.5">Ch.5 — Polynomials</option>
+              <option value="Ch.6">Ch.6 — Rational Expressions</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-group">
+            <label class="field-label">테스트 날짜 <span class="req">*</span></label>
+            <input type="date" id="score-date">
+          </div>
+          <div class="field-group">
+            <label class="field-label">만점 <span class="req">*</span></label>
+            <input type="number" id="score-max" value="50" min="1" max="200">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-group" style="flex:1">
+            <label class="field-label">획득 점수 <span class="req">*</span></label>
+            <input type="number" id="score-got" min="0" max="200" placeholder="0">
+          </div>
+          <div class="field-group score-preview-wrap">
+            <label class="field-label">성취도</label>
+            <div class="score-preview" id="score-preview">—</div>
+          </div>
+        </div>
+        <div class="field-group">
+          <label class="field-label">메모 (선택)</label>
+          <textarea id="score-note" rows="2" placeholder="특이사항, 오답 패턴 등…"></textarea>
+        </div>
+      </div>
+
+      <!-- DETAIL MODE -->
+      <div id="form-detail" style="display:none">
+        <div class="field-row">
+          <div class="field-group">
+            <label class="field-label">학생 <span class="req">*</span></label>
+            <select id="detail-student"><option value="">학생 선택…</option></select>
+          </div>
+          <div class="field-group">
+            <label class="field-label">챕터 <span class="req">*</span></label>
+            <select id="detail-chapter">
+              <option value="">챕터 선택…</option>
+              <option value="Ch.1">Ch.1 — Functions &amp; Linear</option>
+              <option value="Ch.2">Ch.2 — Systems &amp; Matrices</option>
+              <option value="Ch.3">Ch.3 — Factoring &amp; Polynomials</option>
+              <option value="Ch.4">Ch.4 — Quadratic Functions</option>
+              <option value="Ch.5">Ch.5 — Polynomials</option>
+              <option value="Ch.6">Ch.6 — Rational Expressions</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="field-label">날짜 <span class="req">*</span></label>
+            <input type="date" id="detail-date">
+          </div>
+        </div>
+
+        <div class="section-title" style="margin-top:1.5rem">MCQ (객관식) — 각 2점</div>
+        <div class="q-grid" id="mcq-grid"></div>
+
+        <div class="section-title" style="margin-top:1.5rem">FRQ (서술형) — 문항별 배점</div>
+        <div id="frq-grid"></div>
+
+        <div class="score-summary-bar">
+          <span>자동 계산된 점수: <strong id="auto-score">0</strong> / <strong id="auto-max">50</strong></span>
+          <span class="badge" id="auto-badge">—</span>
+        </div>
+
+        <div class="field-group" style="margin-top:1rem">
+          <label class="field-label">메모 (선택)</label>
+          <textarea id="detail-note" rows="2" placeholder="특이사항, 오답 패턴 등…"></textarea>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn-primary" id="btn-save-score">저장</button>
+        <div class="save-msg" id="save-msg"></div>
+      </div>
+    </div>
+
+    <!-- RESULT CARD -->
+    <div class="result-card" id="result-card" style="display:none">
+      <div class="result-header">
+        <div class="result-score-big" id="result-pct">—</div>
+        <div>
+          <div class="result-name" id="result-name">—</div>
+          <div class="result-chapter" id="result-chapter">—</div>
+        </div>
+      </div>
+      <div class="result-tier" id="result-tier"></div>
+      <div class="result-step" id="result-step"></div>
+      <div class="result-task" id="result-task"></div>
+    </div>
+  </div>
+
+  <!-- STUDENTS -->
+  <div class="view" id="view-students">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">학생 관리</h1>
+        <p class="page-sub">학생을 추가하고 개인 기록을 확인합니다</p>
+      </div>
+    </div>
+
+    <div class="add-student-bar teacher-only">
+      <input type="text"   id="new-student-name"   placeholder="학생 이름 (예: 김민준)">
+      <input type="text"   id="new-student-school" placeholder="학교/학년 (선택)">
+      <input type="email"  id="new-student-email"  placeholder="연결 이메일 (선택)">
+      <button class="btn-primary" id="btn-add-student">+ 학생 추가</button>
+    </div>
+
+    <div id="student-cards"></div>
+  </div>
+
+  <!-- STATS -->
+  <div class="view" id="view-stats">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">통계</h1>
+        <p class="page-sub">학생별 · 챕터별 성취도 분석</p>
+      </div>
+    </div>
+
+    <div class="stats-filter-bar">
+      <div class="field-group" style="min-width:160px">
+        <label class="field-label">학생 필터</label>
+        <select id="stats-student-filter">
+          <option value="all">전체 학생</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="charts-grid">
+      <div class="chart-card">
+        <div class="chart-title">챕터별 평균 성취도</div>
+        <div style="position:relative;height:260px"><canvas id="chart-chapter" role="img" aria-label="챕터별 평균 성취도 막대 그래프">챕터별 평균 성취도 데이터</canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">성취도 분포</div>
+        <div style="position:relative;height:260px"><canvas id="chart-dist" role="img" aria-label="성취도 구간 분포 파이 차트">성취도 분포 데이터</canvas></div>
+      </div>
+    </div>
+    <div class="chart-card" style="margin-top:1.5rem">
+      <div class="chart-title">점수 추이 (시간순)</div>
+      <div style="position:relative;height:280px"><canvas id="chart-trend" role="img" aria-label="시간에 따른 점수 추이 선 그래프">점수 추이 데이터</canvas></div>
+    </div>
+
+    <div class="section-title" style="margin-top:2rem">전체 기록 목록</div>
+    <div class="table-wrap">
+      <table id="all-table">
+        <thead><tr>
+          <th>학생</th><th>챕터</th><th>날짜</th><th>점수</th><th>성취도</th><th>다음 스텝</th><th></th>
+        </tr></thead>
+        <tbody id="all-tbody"></tbody>
+      </table>
+      <div class="empty-state" id="all-empty">기록이 없습니다.</div>
+    </div>
+  </div>
+
+</main>
+</div><!-- /#app-gate -->
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
