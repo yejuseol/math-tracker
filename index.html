@@ -56,12 +56,38 @@
         <input type="password" id="signup-password" placeholder="6자 이상" autocomplete="new-password">
       </div>
       <div class="field-group">
-        <label class="field-label">역할</label>
+        <label class="field-label">역할 <span class="req">*</span></label>
         <select id="signup-role">
-          <option value="teacher">선생님 (Teacher)</option>
           <option value="student">학생 (Student)</option>
+          <option value="parent">학부모 (Parent)</option>
         </select>
       </div>
+
+      <!-- 학생 전용 필드 -->
+      <div id="signup-student-fields">
+        <div class="field-group">
+          <label class="field-label">학년 <span class="req">*</span></label>
+          <select id="signup-grade">
+            <option value="">학년 선택…</option>
+            <option value="G8">G8 (중학교 2학년)</option>
+            <option value="G9">G9 (중학교 3학년)</option>
+            <option value="G10">G10 (고등학교 1학년)</option>
+            <option value="G11">G11 (고등학교 2학년)</option>
+            <option value="G12">G12 (고등학교 3학년)</option>
+            <option value="College">College</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 학부모 전용 필드 -->
+      <div id="signup-parent-fields" style="display:none">
+        <div class="field-group">
+          <label class="field-label">자녀 이메일 <span class="req">*</span></label>
+          <input type="email" id="signup-child-email" placeholder="자녀가 회원가입한 이메일">
+          <span class="field-hint">자녀가 먼저 학생으로 가입한 후 이메일을 입력해주세요</span>
+        </div>
+      </div>
+
       <div class="auth-error" id="signup-error"></div>
       <button class="btn-primary auth-submit-btn" id="btn-signup">회원가입</button>
     </div>
@@ -187,23 +213,21 @@
             <select id="score-student"><option value="">학생 선택…</option></select>
           </div>
           <div class="field-group">
-            <label class="field-label">챕터 <span class="req">*</span></label>
-            <select id="score-chapter">
-              <option value="">챕터 선택…</option>
-              <option value="Ch.1">Ch.1 — Functions &amp; Linear</option>
-              <option value="Ch.2">Ch.2 — Systems &amp; Matrices</option>
-              <option value="Ch.3">Ch.3 — Factoring &amp; Polynomials</option>
-              <option value="Ch.4">Ch.4 — Quadratic Functions</option>
-              <option value="Ch.5">Ch.5 — Polynomials</option>
-              <option value="Ch.6">Ch.6 — Rational Expressions</option>
-            </select>
+            <label class="field-label">과목 <span class="req">*</span></label>
+            <select id="score-subject"><option value="">과목 선택…</option></select>
           </div>
         </div>
         <div class="field-row">
           <div class="field-group">
+            <label class="field-label">챕터 <span class="req">*</span></label>
+            <select id="score-chapter"><option value="">챕터 선택…</option></select>
+          </div>
+          <div class="field-group">
             <label class="field-label">테스트 날짜 <span class="req">*</span></label>
             <input type="date" id="score-date">
           </div>
+        </div>
+        <div class="field-row">
           <div class="field-group">
             <label class="field-label">만점 <span class="req">*</span></label>
             <input type="number" id="score-max" value="50" min="1" max="200">
@@ -233,16 +257,14 @@
             <select id="detail-student"><option value="">학생 선택…</option></select>
           </div>
           <div class="field-group">
+            <label class="field-label">과목 <span class="req">*</span></label>
+            <select id="detail-subject"><option value="">과목 선택…</option></select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-group">
             <label class="field-label">챕터 <span class="req">*</span></label>
-            <select id="detail-chapter">
-              <option value="">챕터 선택…</option>
-              <option value="Ch.1">Ch.1 — Functions &amp; Linear</option>
-              <option value="Ch.2">Ch.2 — Systems &amp; Matrices</option>
-              <option value="Ch.3">Ch.3 — Factoring &amp; Polynomials</option>
-              <option value="Ch.4">Ch.4 — Quadratic Functions</option>
-              <option value="Ch.5">Ch.5 — Polynomials</option>
-              <option value="Ch.6">Ch.6 — Rational Expressions</option>
-            </select>
+            <select id="detail-chapter"><option value="">챕터 선택…</option></select>
           </div>
           <div class="field-group">
             <label class="field-label">날짜 <span class="req">*</span></label>
@@ -298,10 +320,30 @@
     </div>
 
     <div class="add-student-bar teacher-only">
-      <input type="text"   id="new-student-name"   placeholder="학생 이름 (예: 김민준)">
-      <input type="text"   id="new-student-school" placeholder="학교/학년 (선택)">
-      <input type="email"  id="new-student-email"  placeholder="연결 이메일 (선택)">
+      <input type="text"  id="new-student-name"   placeholder="학생 이름 (예: 김민준)">
+      <input type="text"  id="new-student-school" placeholder="학교 (선택)">
+      <select id="new-student-grade">
+        <option value="">학년 선택…</option>
+        <option value="G8">G8</option>
+        <option value="G9">G9</option>
+        <option value="G10">G10</option>
+        <option value="G11">G11</option>
+        <option value="G12">G12</option>
+        <option value="College">College</option>
+      </select>
+      <input type="email" id="new-student-email"  placeholder="연결 이메일 (선택)">
       <button class="btn-primary" id="btn-add-student">+ 학생 추가</button>
+    </div>
+    <div class="add-student-subjects teacher-only">
+      <label class="field-label">수강 과목 선택 (복수 가능)</label>
+      <div class="subject-checkboxes" id="new-student-subjects">
+        <label class="subject-check-item"><input type="checkbox" value="Algebra 1"> Algebra 1</label>
+        <label class="subject-check-item"><input type="checkbox" value="Algebra 2"> Algebra 2</label>
+        <label class="subject-check-item"><input type="checkbox" value="Precalculus"> Precalculus</label>
+        <label class="subject-check-item"><input type="checkbox" value="AP Precalculus"> AP Precalculus</label>
+        <label class="subject-check-item"><input type="checkbox" value="AP Calculus AB"> AP Calculus AB</label>
+        <label class="subject-check-item"><input type="checkbox" value="AP Calculus BC"> AP Calculus BC</label>
+      </div>
     </div>
 
     <div id="student-cards"></div>
@@ -321,6 +363,18 @@
         <label class="field-label">학생 필터</label>
         <select id="stats-student-filter">
           <option value="all">전체 학생</option>
+        </select>
+      </div>
+      <div class="field-group" style="min-width:160px">
+        <label class="field-label">과목 필터</label>
+        <select id="stats-subject-filter">
+          <option value="all">전체 과목</option>
+          <option value="Algebra 1">Algebra 1</option>
+          <option value="Algebra 2">Algebra 2</option>
+          <option value="Precalculus">Precalculus</option>
+          <option value="AP Precalculus">AP Precalculus</option>
+          <option value="AP Calculus AB">AP Calculus AB</option>
+          <option value="AP Calculus BC">AP Calculus BC</option>
         </select>
       </div>
     </div>
