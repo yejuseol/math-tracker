@@ -513,10 +513,16 @@ function renderDashboard() {
     sub.textContent = '전체 학생 현황';
   }
 
+  const tsMs = ts => {
+    if (!ts) return 0;
+    if (typeof ts.toMillis === 'function') return ts.toMillis();
+    if (ts.seconds != null) return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
+    return 0;
+  };
   const recent = [...filteredScores].sort((a, b) => {
     const d = (b.date || '').localeCompare(a.date || '');
     if (d !== 0) return d;
-    return (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0);
+    return tsMs(b.createdAt) - tsMs(a.createdAt);
   }).slice(0, 10);
   const tbody  = document.getElementById('recent-tbody');
   const empty  = document.getElementById('recent-empty');
@@ -1091,10 +1097,16 @@ function renderStats() {
     }
   });
 
+  const tsMillis = ts => {
+    if (!ts) return 0;
+    if (typeof ts.toMillis === 'function') return ts.toMillis();
+    if (ts.seconds != null) return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
+    return 0;
+  };
   const trendData = [...filteredScores].sort((a, b) => {
     const d = (a.date || '').localeCompare(b.date || '');
     if (d !== 0) return d;
-    return (a.createdAt?.toMillis?.() || 0) - (b.createdAt?.toMillis?.() || 0);
+    return tsMillis(a.createdAt) - tsMillis(b.createdAt);
   });
   const multiStudent = studentFilter === 'all' && students.length > 1 && currentRole === 'teacher';
   if (chartTrend) chartTrend.destroy();
