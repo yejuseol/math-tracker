@@ -337,6 +337,53 @@ textarea { resize: vertical; min-height: 60px; }
 .delete-btn { background: none; border: none; cursor: pointer; color: var(--text-3); font-size: 14px; padding: 2px 6px; }
 .delete-btn:hover { color: var(--red); }
 
+/* ── UNLINKED MESSAGE ── */
+.unlinked-msg {
+  padding: 3rem 2rem; text-align: center;
+  font-size: 14px; color: var(--text-2); line-height: 1.8;
+  background: var(--surface2); border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+/* ── SUBJECT BADGES ── */
+.s-subjects { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.subject-badge {
+  display: inline-block; font-size: 10px; font-weight: 500;
+  padding: 2px 7px; border-radius: 20px; white-space: nowrap;
+  background: var(--blue-bg); color: var(--blue);
+}
+.s-grade {
+  display: inline-block; font-size: 11px; font-weight: 500;
+  color: var(--text-3); margin-left: 4px;
+}
+
+/* ── STUDENT ADD FORM — SUBJECTS ── */
+.add-student-subjects {
+  margin-bottom: 1.5rem;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.subject-checkboxes {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.subject-check-item {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 13px; cursor: pointer;
+  padding: 5px 10px; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); background: var(--surface);
+  transition: background .1s, border-color .1s;
+}
+.subject-check-item:hover { background: var(--surface2); }
+.subject-check-item input[type=checkbox] { width: auto; accent-color: var(--text); cursor: pointer; }
+.subject-check-item:has(input:checked) {
+  background: var(--text); color: #fff; border-color: var(--text);
+}
+
+/* ── STATS FILTER BAR ── */
+.stats-filter-bar { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 1.5rem; }
+
+/* ── AUTH HINT ── */
+.field-hint { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+
 @media (max-width: 700px) {
   .sidebar { width: 100%; height: auto; position: relative; flex-direction: row; flex-wrap: wrap; padding: 1rem; }
   body { flex-direction: column; }
