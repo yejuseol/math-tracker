@@ -28,21 +28,21 @@ function getTier(pct) {
 }
 
 function getTierLabel(pct) {
-  if (pct >= 76) return '✓  76% 이상 — 다음 챕터 진행';
-  if (pct >= 56) return '↻  56–75% — 보충 병행 진행';
-  return '✗  55% 이하 — 복습 후 진행';
+  if (pct >= 76) return '✓  76% 이상 — 다음 챕터 바로 진행';
+  if (pct >= 56) return '↻  56–75% — 다음 챕터 진행 + 취약 단원 병행 보충';
+  return '✗  55% 이하 — 기존 챕터 복습 1회 후 다음 챕터 시작';
 }
 
 function getNextStep(pct) {
-  if (pct >= 76) return '다음 챕터로 바로 진행합니다. 틀린 문항은 선생님 피드백을 통해 확인하세요.';
+  if (pct >= 76) return '다음 챕터로 바로 진행합니다. 틀린 문항은 오답풀이로 확인하세요.';
   if (pct >= 56) return '다음 챕터 진도를 나가면서, 취약 단원을 병행하여 보충합니다.';
-  return '다음 수업 한 회를 현재 챕터 복습에 집중한 후 다음 챕터를 시작합니다.';
+  return '기존 챕터를 1회 복습한 후 다음 챕터를 시작합니다.';
 }
 
 function getSelfStudyTask(pct) {
   if (pct >= 76) return null;
-  if (pct >= 56) return '📝  자기주도 과제: 틀린 단원의 교재 Example 문제를 직접 다시 풀고, 각 개념을 영어로 한 문장씩 노트에 정리해오세요.\n예) "The slope shows the rate of change of a line."';
-  return '📚  자기주도 과제: 취약 단원의 핵심 개념 박스(shaded box)를 교재에서 찾아, 영어 + 한국어로 노트에 정리해오세요 (Vocabulary Note 작성).';
+  if (pct >= 56) return '📝  자기주도 과제: 틀린 단원의 교재에서 각 Example 별 첫 문제를 직접 다시 풀고, 각 문제별 주요 개념을 영어로 한 문장씩 노트에 정리해오세요.\n예) "Example 1-1. The slope shows the rate of change of a line."';
+  return '📚  자기주도 과제: 취약 단원의 교재 핵심 개념 박스(shaded box)를 중심으로 스스로 복습한 이후, 다음 수업 시간에 본인만의 언어로 설명해보세요.';
 }
 
 // ── AUTH ERROR MESSAGES ────────────────────────────────────────
