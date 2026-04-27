@@ -3,6 +3,7 @@ import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut
 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import {
@@ -233,6 +234,26 @@ document.getElementById('signup-role').addEventListener('change', () => {
   const role = document.getElementById('signup-role').value;
   document.getElementById('signup-student-fields').style.display = role === 'student' ? '' : 'none';
   document.getElementById('signup-parent-fields').style.display  = role === 'parent'  ? '' : 'none';
+});
+
+document.getElementById('btn-forgot-pw').addEventListener('click', async () => {
+  const email   = document.getElementById('login-email').value.trim();
+  const msgEl   = document.getElementById('reset-msg');
+  const errorEl = document.getElementById('login-error');
+  if (!email) {
+    errorEl.textContent = '이메일을 먼저 입력해주세요.';
+    return;
+  }
+  errorEl.textContent = '';
+  msgEl.textContent   = '발송 중...';
+  try {
+    await sendPasswordResetEmail(auth, email);
+    msgEl.textContent = `✓ ${email} 로 재설정 메일을 발송했습니다. 받은편지함을 확인해주세요.`;
+    msgEl.classList.add('reset-success');
+  } catch (err) {
+    msgEl.textContent = '';
+    errorEl.textContent = getAuthErrorMessage(err.code);
+  }
 });
 
 document.getElementById('btn-login').addEventListener('click', async () => {

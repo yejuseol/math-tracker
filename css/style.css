@@ -62,6 +62,15 @@ body { background: var(--bg); color: var(--text); display: flex; min-height: 100
 #auth-signup-form .field-group { margin-bottom: 0.875rem; }
 .auth-error { font-size: 12.5px; color: var(--red); margin-bottom: 0.5rem; min-height: 1.2em; }
 .auth-submit-btn { width: 100%; padding: 10px; margin-top: 0.25rem; }
+.auth-footer { text-align: center; margin-top: 0.75rem; }
+.link-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 12.5px; color: var(--text-3);
+  font-family: 'DM Sans', sans-serif; padding: 0;
+  text-decoration: underline; transition: color .12s;
+}
+.link-btn:hover { color: var(--text-2); }
+.auth-info { font-size: 12.5px; color: var(--green); margin-top: 0.5rem; line-height: 1.5; min-height: 1.2em; }
 
 /* ── APP GATE ── */
 #app-gate { display: flex; flex: 1; width: 100%; }
