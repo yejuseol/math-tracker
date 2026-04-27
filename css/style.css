@@ -527,6 +527,47 @@ textarea { resize: vertical; min-height: 60px; }
 .mat-msg.success { color: #2d6a4f; }
 .mat-msg.error   { color: #b91c1c; }
 
+/* ── MATERIALS — 과목 필터 바 ── */
+.mat-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  margin-bottom: 1rem;
+}
+.mat-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: 5px 14px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: #f5f4f2;
+  font-size: .82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+  white-space: nowrap;
+}
+.mat-filter-btn:hover { background: #eae8e5; }
+.mat-filter-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.mat-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 99px;
+  font-size: .72rem;
+  font-weight: 700;
+  background: rgba(0,0,0,.12);
+}
+.mat-filter-btn.active .mat-filter-count { background: rgba(255,255,255,.25); }
+
 /* ── MATERIALS — 선생님 관리 카드 ── */
 #materials-admin-list { display: flex; flex-direction: column; gap: .75rem; }
 .mat-admin-card {
