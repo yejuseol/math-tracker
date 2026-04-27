@@ -14,24 +14,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Create Firebase config from secrets
-        env:
-          API_KEY:            ${{ secrets.FIREBASE_API_KEY }}
-          AUTH_DOMAIN:        ${{ secrets.FIREBASE_AUTH_DOMAIN }}
-          PROJECT_ID:         ${{ secrets.FIREBASE_PROJECT_ID }}
-          STORAGE_BUCKET:     ${{ secrets.FIREBASE_STORAGE_BUCKET }}
-          MESSAGING_SENDER_ID:${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
-          APP_ID:             ${{ secrets.FIREBASE_APP_ID }}
         run: |
-          cat > js/firebase-config.js << EOF
-          export const firebaseConfig = {
-            apiKey: "${API_KEY}",
-            authDomain: "${AUTH_DOMAIN}",
-            projectId: "${PROJECT_ID}",
-            storageBucket: "${STORAGE_BUCKET}",
-            messagingSenderId: "${MESSAGING_SENDER_ID}",
-            appId: "${APP_ID}"
-          };
-          EOF
+          printf 'export const firebaseConfig = {\n  apiKey: "%s",\n  authDomain: "%s",\n  projectId: "%s",\n  storageBucket: "%s",\n  messagingSenderId: "%s",\n  appId: "%s"\n};\n' \
+            "${{ secrets.FIREBASE_API_KEY }}" \
+            "${{ secrets.FIREBASE_AUTH_DOMAIN }}" \
+            "${{ secrets.FIREBASE_PROJECT_ID }}" \
+            "${{ secrets.FIREBASE_STORAGE_BUCKET }}" \
+            "${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}" \
+            "${{ secrets.FIREBASE_APP_ID }}" \
+            > js/firebase-config.js
 
       - uses: peaceiris/actions-gh-pages@v4
         with:
