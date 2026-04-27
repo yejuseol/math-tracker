@@ -384,6 +384,31 @@ textarea { resize: vertical; min-height: 60px; }
 /* ── AUTH HINT ── */
 .field-hint { font-size: 11px; color: var(--text-3); margin-top: 2px; }
 
+/* ── STUDENT EDIT FORM ── */
+.btn-edit {
+  background: none; border: none; cursor: pointer;
+  font-size: 13px; padding: 2px 4px; color: var(--text-3);
+  transition: color .12s;
+}
+.btn-edit:hover { color: var(--text); }
+.student-edit-form {
+  border-top: 1px solid var(--border);
+  padding: 10px 0 6px; margin-bottom: 10px;
+}
+.edit-row {
+  display: flex; gap: 8px; margin-bottom: 8px;
+}
+.edit-row input, .edit-row select {
+  flex: 1; font-size: 12.5px; padding: 5px 8px;
+}
+.edit-subject-wrap {
+  display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px;
+}
+.edit-actions { display: flex; gap: 8px; }
+
+/* ── STUDENTS FILTER BAR ── */
+.students-filter-bar { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 1rem; }
+
 @media (max-width: 700px) {
   .sidebar { width: 100%; height: auto; position: relative; flex-direction: row; flex-wrap: wrap; padding: 1rem; }
   body { flex-direction: column; }
