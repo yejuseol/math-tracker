@@ -256,6 +256,7 @@ let materials = [];
 let unsubStudents  = null;
 let unsubScores    = null;
 let unsubMaterials = null;
+let matAdminFilter = 'all'; // 자료 관리 탭 과목 필터
 let currentRole        = 'teacher';
 let currentStudentView = null;
 let activeSubject = '';
@@ -1324,17 +1325,44 @@ function renderMaterialsAdmin() {
 
   if (materials.length === 0) {
     el.innerHTML = `<div class="empty-state">등록된 파일이 없습니다. 위에서 업로드해주세요.</div>`;
+    matAdminFilter = 'all';
     return;
   }
 
-  const sorted = [...materials].sort((a, b) =>
-    (a.subject + a.chapter).localeCompare(b.subject + b.chapter));
+  // ── 과목 필터 버튼 ──────────────────────────────────────────
+  const subjects = [...new Set(materials.map(m => m.subject))].sort();
 
-  el.innerHTML = sorted.map(m => {
-    const allowed   = new Set(m.allowedEmails || []);
+  // 현재 필터가 존재하지 않는 과목이면 'all'로 리셋
+  if (matAdminFilter !== 'all' && !subjects.includes(matAdminFilter)) {
+    matAdminFilter = 'all';
+  }
+
+  const filterBar = `
+    <div class="mat-filter-bar">
+      <button class="mat-filter-btn ${matAdminFilter === 'all' ? 'active' : ''}"
+        onclick="matSetFilter('all')">전체 <span class="mat-filter-count">${materials.length}</span></button>
+      ${subjects.map(s => {
+        const cnt = materials.filter(m => m.subject === s).length;
+        return `<button class="mat-filter-btn ${matAdminFilter === s ? 'active' : ''}"
+          onclick="matSetFilter('${s}')">${s} <span class="mat-filter-count">${cnt}</span></button>`;
+      }).join('')}
+    </div>`;
+
+  // ── 필터 적용 후 정렬 ──────────────────────────────────────
+  const visible = (matAdminFilter === 'all'
+    ? [...materials]
+    : materials.filter(m => m.subject === matAdminFilter)
+  ).sort((a, b) => (a.subject + a.chapter).localeCompare(b.subject + b.chapter));
+
+  if (visible.length === 0) {
+    el.innerHTML = filterBar + `<div class="empty-state">해당 과목의 파일이 없습니다.</div>`;
+    return;
+  }
+
+  const cards = visible.map(m => {
+    const allowed    = new Set(m.allowedEmails || []);
     const uploadedAt = m.createdAt?.toDate?.()?.toLocaleDateString('ko-KR') || '';
 
-    // Only students with linkedEmail are toggleable
     const studentItems = students.filter(s => s.linkedEmail).map(s => {
       const on = allowed.has(s.linkedEmail.toLowerCase());
       return `
@@ -1372,7 +1400,15 @@ function renderMaterialsAdmin() {
         </div>
       </div>`;
   }).join('');
+
+  el.innerHTML = filterBar + cards;
 }
+
+// ── 필터 세팅 (전역) ────────────────────────────────────────────
+window.matSetFilter = function (subject) {
+  matAdminFilter = subject;
+  renderMaterialsAdmin();
+};
 
 // ── 업로드 폼 초기화 (materials-admin 탭 진입 시) ─────────────────
 let _uploadFormReady = false;
