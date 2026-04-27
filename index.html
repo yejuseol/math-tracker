@@ -66,6 +66,10 @@
       <!-- 학생 전용 필드 -->
       <div id="signup-student-fields">
         <div class="field-group">
+          <label class="field-label">학교</label>
+          <input type="text" id="signup-school" placeholder="학교 이름 입력 (선택)">
+        </div>
+        <div class="field-group">
           <label class="field-label">학년 <span class="req">*</span></label>
           <select id="signup-grade">
             <option value="">학년 선택…</option>
@@ -135,14 +139,16 @@
     <button class="btn-logout" id="btn-logout" title="로그아웃">⏻</button>
   </div>
 
-  <div class="nav-section-label">뷰 모드</div>
-  <div class="role-toggle">
-    <button class="role-btn active" id="role-teacher">선생님</button>
-    <button class="role-btn" id="role-student">학생/학부모</button>
-  </div>
-  <div class="student-select-wrap" id="student-select-wrap" style="display:none">
-    <label class="field-label">학생 선택</label>
-    <select id="student-view-select"></select>
+  <div id="view-mode-section">
+    <div class="nav-section-label">뷰 모드</div>
+    <div class="role-toggle">
+      <button class="role-btn active" id="role-teacher">선생님</button>
+      <button class="role-btn" id="role-student">학생/학부모</button>
+    </div>
+    <div class="student-select-wrap" id="student-select-wrap" style="display:none">
+      <label class="field-label">학생 선택</label>
+      <select id="student-view-select"></select>
+    </div>
   </div>
 </nav>
 
@@ -343,6 +349,21 @@
         <label class="subject-check-item"><input type="checkbox" value="AP Precalculus"> AP Precalculus</label>
         <label class="subject-check-item"><input type="checkbox" value="AP Calculus AB"> AP Calculus AB</label>
         <label class="subject-check-item"><input type="checkbox" value="AP Calculus BC"> AP Calculus BC</label>
+      </div>
+    </div>
+
+    <div class="students-filter-bar teacher-only">
+      <div class="field-group" style="min-width:180px">
+        <label class="field-label">과목 필터</label>
+        <select id="students-subject-filter">
+          <option value="all">전체 과목</option>
+          <option value="Algebra 1">Algebra 1</option>
+          <option value="Algebra 2">Algebra 2</option>
+          <option value="Precalculus">Precalculus</option>
+          <option value="AP Precalculus">AP Precalculus</option>
+          <option value="AP Calculus AB">AP Calculus AB</option>
+          <option value="AP Calculus BC">AP Calculus BC</option>
+        </select>
       </div>
     </div>
 

@@ -6,7 +6,7 @@ import {
   signOut
 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import {
-  collection, doc, addDoc, setDoc, deleteDoc, getDoc, getDocs,
+  collection, doc, addDoc, setDoc, updateDoc, deleteDoc, getDoc, getDocs,
   onSnapshot, serverTimestamp, query, where, writeBatch
 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
@@ -269,7 +269,8 @@ document.getElementById('btn-signup').addEventListener('click', async () => {
     if (!linkedChildEmail) { errorEl.textContent = '자녀 이메일을 입력해주세요.'; return; }
   }
 
-  const grade = role === 'student' ? (document.getElementById('signup-grade').value || '') : '';
+  const grade  = role === 'student' ? (document.getElementById('signup-grade').value  || '') : '';
+  const school = role === 'student' ? (document.getElementById('signup-school').value.trim() || '') : '';
 
   btn.textContent = '가입 중...'; btn.disabled = true; errorEl.textContent = '';
   try {
@@ -279,6 +280,7 @@ document.getElementById('btn-signup').addEventListener('click', async () => {
     // Save user profile
     const profileData = { name, email, role, createdAt: serverTimestamp() };
     if (grade)            profileData.grade            = grade;
+    if (school)           profileData.school           = school;
     if (linkedChildEmail) profileData.linkedChildEmail = linkedChildEmail;
     await setDoc(doc(db, 'users', uid), profileData);
 
@@ -319,10 +321,11 @@ onAuthStateChanged(auth, async (user) => {
       if (existing.empty) {
         try {
           await addDoc(collection(db, 'students'), {
-            name: currentUserProfile.name || email,
-            grade: currentUserProfile.grade || '',
+            name:        currentUserProfile.name   || email,
+            grade:       currentUserProfile.grade  || '',
+            school:      currentUserProfile.school || '',
             linkedEmail: email,
-            school: '', subjects: [],
+            subjects:    [],
             createdAt: serverTimestamp(), autoCreated: true
           });
         } catch (e) { console.warn('student doc create:', e.message); }
@@ -361,12 +364,11 @@ function initApp() {
     document.getElementById('role-teacher').classList.add('active');
     document.getElementById('role-student').classList.remove('active');
     document.getElementById('student-select-wrap').style.display = 'none';
+    document.getElementById('view-mode-section').style.display = '';
     document.querySelectorAll('.teacher-only').forEach(el => el.style.display = '');
   } else {
-    // student or parent: hide teacher controls, enter student view
-    document.getElementById('role-teacher').classList.remove('active');
-    document.getElementById('role-student').classList.add('active');
-    document.getElementById('student-select-wrap').style.display = 'block';
+    // student or parent: hide teacher controls and view-mode toggle entirely
+    document.getElementById('view-mode-section').style.display = 'none';
     document.querySelectorAll('.teacher-only').forEach(el => el.style.display = 'none');
   }
 
@@ -851,14 +853,23 @@ function renderStudents() {
     showUnlinkedMessage(container); return;
   }
 
-  const viewStudents = (currentRole === 'student' || currentRole === 'parent')
+  let viewStudents = (currentRole === 'student' || currentRole === 'parent')
     ? students.filter(s => s.id === currentStudentView)
     : students;
+
+  // Subject filter (teacher only)
+  const subjectFilter = document.getElementById('students-subject-filter')?.value || 'all';
+  if (currentRole === 'teacher' && subjectFilter !== 'all') {
+    viewStudents = viewStudents.filter(s => (s.subjects || []).includes(subjectFilter));
+  }
 
   if (viewStudents.length === 0) {
     container.innerHTML = '<p style="color:var(--text-3);font-size:13px;padding:1rem 0">학생이 없습니다. 위에서 추가해주세요.</p>';
     return;
   }
+
+  const SUBJECT_OPTIONS = ['Algebra 1','Algebra 2','Precalculus','AP Precalculus','AP Calculus AB','AP Calculus BC'];
+  const GRADE_OPTIONS   = ['G8','G9','G10','G11','G12','College'];
 
   container.innerHTML = '<div class="student-cards-grid">' +
     viewStudents.map(st => {
@@ -870,6 +881,28 @@ function renderStudents() {
       const subjectBadges = (st.subjects || []).map(s =>
         `<span class="subject-badge">${s}</span>`).join('');
 
+      // Edit form (teacher only)
+      const editForm = currentRole === 'teacher' ? `
+        <div class="student-edit-form" id="edit-${st.id}" style="display:none">
+          <div class="edit-row">
+            <input type="text"  class="edit-school" placeholder="학교" value="${st.school || ''}">
+            <select class="edit-grade">
+              <option value="">학년…</option>
+              ${GRADE_OPTIONS.map(g => `<option value="${g}"${st.grade===g?' selected':''}>${g}</option>`).join('')}
+            </select>
+          </div>
+          <div class="edit-subject-wrap">
+            ${SUBJECT_OPTIONS.map(sub => `
+              <label class="subject-check-item">
+                <input type="checkbox" value="${sub}"${(st.subjects||[]).includes(sub)?' checked':''}> ${sub}
+              </label>`).join('')}
+          </div>
+          <div class="edit-actions">
+            <button class="btn-primary btn-save-edit" data-id="${st.id}" style="font-size:12px;padding:5px 14px">저장</button>
+            <button class="btn-secondary btn-cancel-edit" data-id="${st.id}" style="font-size:12px;padding:4px 10px">취소</button>
+          </div>
+        </div>` : '';
+
       return `<div class="student-card">
         <div class="student-card-header">
           <div class="avatar">${initials(st.name)}</div>
@@ -879,8 +912,12 @@ function renderStudents() {
             ${st.linkedEmail ? `<div class="s-email">${st.linkedEmail}</div>` : ''}
             ${subjectBadges ? `<div class="s-subjects">${subjectBadges}</div>` : ''}
           </div>
-          <button class="delete-btn teacher-only" data-del="${st.id}" title="삭제">✕</button>
+          <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+            ${currentRole === 'teacher' ? `<button class="btn-edit teacher-only" data-edit="${st.id}" title="편집">✏️</button>` : ''}
+            <button class="delete-btn teacher-only" data-del="${st.id}" title="삭제">✕</button>
+          </div>
         </div>
+        ${editForm}
         <div class="student-stats">
           <div class="s-stat"><div class="s-stat-num">${stScores.length}</div><div class="s-stat-label">테스트 횟수</div></div>
           <div class="s-stat"><div class="s-stat-num">${avg !== null ? avg + '%' : '—'}</div><div class="s-stat-label">평균 성취도</div></div>
@@ -902,12 +939,44 @@ function renderStudents() {
       </div>`;
     }).join('') + '</div>';
 
+  // Edit button toggle
+  document.querySelectorAll('[data-edit]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const form = document.getElementById('edit-' + btn.dataset.edit);
+      if (form) form.style.display = form.style.display === 'none' ? '' : 'none';
+    });
+  });
+
+  // Save edit
+  document.querySelectorAll('.btn-save-edit').forEach(btn => {
+    btn.addEventListener('click', () => saveStudentEdit(btn.dataset.id, btn.closest('.student-card')));
+  });
+
+  // Cancel edit
+  document.querySelectorAll('.btn-cancel-edit').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const form = document.getElementById('edit-' + btn.dataset.id);
+      if (form) form.style.display = 'none';
+    });
+  });
+
   document.querySelectorAll('[data-del]').forEach(btn => {
     btn.addEventListener('click', () => deleteStudent(btn.dataset.del));
   });
   if (currentRole !== 'teacher') {
     document.querySelectorAll('.teacher-only').forEach(el => el.style.display = 'none');
   }
+}
+
+async function saveStudentEdit(studentId, card) {
+  const school   = card.querySelector('.edit-school').value.trim();
+  const grade    = card.querySelector('.edit-grade').value;
+  const subjects = Array.from(card.querySelectorAll('.edit-subject-wrap input:checked')).map(cb => cb.value);
+  try {
+    await updateDoc(doc(db, 'students', studentId), { school, grade, subjects });
+    const form = document.getElementById('edit-' + studentId);
+    if (form) form.style.display = 'none';
+  } catch (err) { alert('저장 오류: ' + err.message); }
 }
 
 async function deleteStudent(studentId) {
@@ -932,6 +1001,7 @@ function populateStatsFilter() {
 
 document.getElementById('stats-student-filter').addEventListener('change', renderStats);
 document.getElementById('stats-subject-filter').addEventListener('change', renderStats);
+document.getElementById('students-subject-filter').addEventListener('change', renderStudents);
 
 function renderStats() {
   const isRestricted = (currentRole === 'student' || currentRole === 'parent');
