@@ -1,4 +1,4 @@
-import { auth, db } from './auth.js';
+import { auth, db, storage } from './auth.js';
 import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
@@ -8,8 +8,11 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import {
   collection, doc, addDoc, setDoc, updateDoc, deleteDoc, getDoc, getDocs,
-  onSnapshot, serverTimestamp, query, where, writeBatch
+  onSnapshot, serverTimestamp, query, where, writeBatch, arrayUnion, arrayRemove
 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import {
+  ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject
+} from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js';
 
 // ── COURSE DATA ────────────────────────────────────────────────
 const COURSE_DATA = {
@@ -247,10 +250,12 @@ function getChapterData(subject, chapterValue) {
 // ── STATE ──────────────────────────────────────────────────────
 let currentUser        = null;
 let currentUserProfile = null;
-let students = [];
-let scores   = [];
-let unsubStudents = null;
-let unsubScores   = null;
+let students  = [];
+let scores    = [];
+let materials = [];
+let unsubStudents  = null;
+let unsubScores    = null;
+let unsubMaterials = null;
 let currentRole        = 'teacher';
 let currentStudentView = null;
 let activeSubject = '';
@@ -473,6 +478,10 @@ function initApp() {
     document.querySelectorAll('.teacher-only').forEach(el => el.style.display = 'none');
   }
 
+  // materials-admin nav: teacher only
+  const navMatAdmin = document.querySelector('[data-view="materials-admin"]');
+  if (navMatAdmin) navMatAdmin.style.display = role === 'teacher' ? '' : 'none';
+
   setupFirestoreListeners();
   setTodayDates();
   populateSubjectDropdowns();
@@ -481,8 +490,9 @@ function initApp() {
 
 // ── FIRESTORE LISTENERS ────────────────────────────────────────
 function setupFirestoreListeners() {
-  if (unsubStudents) unsubStudents();
-  if (unsubScores)   unsubScores();
+  if (unsubStudents)  unsubStudents();
+  if (unsubScores)    unsubScores();
+  if (unsubMaterials) unsubMaterials();
 
   unsubStudents = onSnapshot(collection(db, 'students'), snap => {
     students = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -509,20 +519,36 @@ function setupFirestoreListeners() {
     renderDashboard();
     renderStats();
   });
+
+  // Materials listener — teacher gets all; student/parent gets only permitted files
+  const isTeacher = currentUserProfile?.role === 'teacher';
+  const matQ = isTeacher
+    ? collection(db, 'materials')
+    : query(collection(db, 'materials'),
+        where('allowedEmails', 'array-contains',
+              (currentUser?.email || '').toLowerCase()));
+
+  unsubMaterials = onSnapshot(matQ, snap => {
+    materials = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderMaterials();
+    if (isTeacher) renderMaterialsAdmin();
+  });
 }
 
 // ── NAVIGATION ─────────────────────────────────────────────────
-const views = ['dashboard', 'add-score', 'students', 'stats'];
+const views = ['dashboard', 'add-score', 'students', 'stats', 'materials', 'materials-admin'];
 function showView(name) {
   views.forEach(v => {
-    document.getElementById('view-' + v).classList.toggle('active', v === name);
+    document.getElementById('view-' + v)?.classList.toggle('active', v === name);
   });
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.view === name);
   });
-  if (name === 'dashboard') renderDashboard();
-  if (name === 'students')  renderStudents();
-  if (name === 'stats')     renderStats();
+  if (name === 'dashboard')        renderDashboard();
+  if (name === 'students')         renderStudents();
+  if (name === 'stats')            renderStats();
+  if (name === 'materials')        renderMaterials();
+  if (name === 'materials-admin') { renderMaterialsAdmin(); initMaterialsUploadForm(); }
 }
 document.querySelectorAll('[data-view]').forEach(el => {
   el.addEventListener('click', e => { e.preventDefault(); showView(el.dataset.view); });
@@ -1252,3 +1278,258 @@ function renderStats() {
     });
   }
 }
+
+// ══════════════════════════════════════════════════════════════
+// ── MATERIALS — 시험 자료실 ────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+
+// ── 학생/학부모 뷰: 허용된 파일 목록 ─────────────────────────────
+function renderMaterials() {
+  const el = document.getElementById('materials-list');
+  if (!el) return;
+
+  if (materials.length === 0) {
+    el.innerHTML = `
+      <div class="empty-state" style="padding:3rem 1rem">
+        <div style="font-size:2rem;margin-bottom:.5rem">📂</div>
+        <div>배포된 시험 파일이 없습니다.</div>
+        <div style="font-size:.85rem;color:var(--muted);margin-top:.25rem">선생님이 파일을 배포하면 여기에 표시됩니다.</div>
+      </div>`;
+    return;
+  }
+
+  const sorted = [...materials].sort((a, b) =>
+    (a.subject + a.chapter).localeCompare(b.subject + b.chapter));
+
+  el.innerHTML = sorted.map(m => `
+    <div class="mat-student-card">
+      <div class="mat-student-left">
+        <span class="mat-subject-badge">${m.subject}</span>
+        <div class="mat-student-info">
+          <div class="mat-student-chapter">${m.chapter}</div>
+          <div class="mat-student-title">${m.title}</div>
+        </div>
+      </div>
+      <a href="${m.downloadUrl}" target="_blank" rel="noopener" class="btn-download">
+        📥 열기
+      </a>
+    </div>
+  `).join('');
+}
+
+// ── 선생님 뷰: 파일 등록 + 권한 관리 ─────────────────────────────
+function renderMaterialsAdmin() {
+  const el = document.getElementById('materials-admin-list');
+  if (!el) return;
+
+  if (materials.length === 0) {
+    el.innerHTML = `<div class="empty-state">등록된 파일이 없습니다. 위에서 업로드해주세요.</div>`;
+    return;
+  }
+
+  const sorted = [...materials].sort((a, b) =>
+    (a.subject + a.chapter).localeCompare(b.subject + b.chapter));
+
+  el.innerHTML = sorted.map(m => {
+    const allowed   = new Set(m.allowedEmails || []);
+    const uploadedAt = m.createdAt?.toDate?.()?.toLocaleDateString('ko-KR') || '';
+
+    // Only students with linkedEmail are toggleable
+    const studentItems = students.filter(s => s.linkedEmail).map(s => {
+      const on = allowed.has(s.linkedEmail.toLowerCase());
+      return `
+        <div class="access-row">
+          <div class="access-row-info">
+            <span class="access-name">${s.name}</span>
+            <span class="access-email">${s.linkedEmail}</span>
+          </div>
+          <label class="mat-toggle">
+            <input type="checkbox" ${on ? 'checked' : ''}
+              onchange="matToggleAccess('${m.id}','${s.linkedEmail.toLowerCase()}',this.checked)">
+            <span class="mat-toggle-slider"></span>
+          </label>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="mat-admin-card" id="matcard-${m.id}">
+        <div class="mat-admin-header">
+          <div class="mat-admin-meta-row">
+            <span class="mat-subject-badge">${m.subject}</span>
+            <span class="mat-chapter-badge">${m.chapter}</span>
+            <span class="mat-upload-date">${uploadedAt}</span>
+          </div>
+          <div class="mat-admin-title">${m.title}</div>
+          <div class="mat-filename">📄 ${m.fileName}</div>
+          <div class="mat-admin-actions">
+            <span class="mat-access-count">${allowed.size}명 접근 허용</span>
+            <button class="btn-sm" onclick="matTogglePanel('${m.id}')">접근 설정 ▾</button>
+            <button class="btn-sm btn-danger-sm" onclick="matDelete('${m.id}','${(m.storagePath||'').replace(/'/g,"\\'")}')">삭제</button>
+          </div>
+        </div>
+        <div class="mat-access-panel" id="mat-panel-${m.id}" style="display:none">
+          ${studentItems || '<div class="empty-sub">회원가입한 학생이 없습니다.</div>'}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ── 업로드 폼 초기화 (materials-admin 탭 진입 시) ─────────────────
+let _uploadFormReady = false;
+function initMaterialsUploadForm() {
+  if (_uploadFormReady) return;
+  _uploadFormReady = true;
+
+  const subjectSel = document.getElementById('mat-subject');
+  const chapterSel = document.getElementById('mat-chapter');
+  const titleInput = document.getElementById('mat-title');
+  if (!subjectSel) return;
+
+  // 과목 목록 채우기
+  subjectSel.innerHTML = SUBJECTS.map(s => `<option value="${s}">${s}</option>`).join('');
+
+  const fillChapters = () => {
+    const chs = COURSE_DATA[subjectSel.value] || [];
+    chapterSel.innerHTML = chs.map(c =>
+      `<option value="${c.value}">${c.label}</option>`).join('');
+    autoTitle();
+  };
+
+  const autoTitle = () => {
+    if (!titleInput.dataset.edited)
+      titleInput.value = `${subjectSel.value} ${chapterSel.value} Unit Test`;
+  };
+
+  subjectSel.addEventListener('change', fillChapters);
+  chapterSel.addEventListener('change', autoTitle);
+  titleInput.addEventListener('input', () => { titleInput.dataset.edited = '1'; });
+
+  document.getElementById('mat-file').addEventListener('change', function () {
+    document.getElementById('mat-file-name').textContent =
+      this.files[0]?.name || '선택된 파일 없음';
+  });
+
+  document.getElementById('btn-mat-upload').addEventListener('click', matUpload);
+
+  fillChapters();
+}
+
+// ── 파일 업로드 ─────────────────────────────────────────────────
+async function matUpload() {
+  const subject  = document.getElementById('mat-subject').value;
+  const chapter  = document.getElementById('mat-chapter').value;
+  const title    = document.getElementById('mat-title').value.trim();
+  const fileEl   = document.getElementById('mat-file');
+  const file     = fileEl.files[0];
+  const msgEl    = document.getElementById('mat-upload-msg');
+  const progWrap = document.getElementById('mat-progress-wrap');
+  const progBar  = document.getElementById('mat-progress-bar');
+  const progText = document.getElementById('mat-progress-text');
+  const btn      = document.getElementById('btn-mat-upload');
+
+  msgEl.textContent = '';
+  if (!subject || !chapter || !title || !file) {
+    msgEl.textContent = '과목, 챕터, 제목, 파일을 모두 입력해주세요.';
+    msgEl.className = 'mat-msg error';
+    return;
+  }
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    msgEl.textContent = 'PDF 파일만 업로드할 수 있습니다.';
+    msgEl.className = 'mat-msg error';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '업로드 중...';
+  progWrap.style.display = 'flex';
+  progBar.style.width = '0%';
+  progText.textContent = '0%';
+
+  try {
+    // Firestore 문서 ID 먼저 확보
+    const matDocRef = doc(collection(db, 'materials'));
+    const spath     = `materials/${matDocRef.id}/${file.name}`;
+    const fRef      = storageRef(storage, spath);
+
+    const task = uploadBytesResumable(fRef, file);
+    await new Promise((resolve, reject) => {
+      task.on('state_changed',
+        snap => {
+          const pct = Math.round(snap.bytesTransferred / snap.totalBytes * 100);
+          progBar.style.width  = pct + '%';
+          progText.textContent = pct + '%';
+        },
+        reject,
+        resolve
+      );
+    });
+
+    const downloadUrl = await getDownloadURL(task.snapshot.ref);
+
+    await setDoc(matDocRef, {
+      title, subject, chapter,
+      fileName: file.name,
+      storagePath: spath,
+      downloadUrl,
+      allowedEmails: [],
+      createdAt:  serverTimestamp(),
+      createdBy:  currentUser.uid
+    });
+
+    progWrap.style.display = 'none';
+    msgEl.textContent = `✓ "${title}" 업로드 완료!`;
+    msgEl.className = 'mat-msg success';
+
+    // 폼 리셋
+    fileEl.value = '';
+    document.getElementById('mat-file-name').textContent = '선택된 파일 없음';
+    document.getElementById('mat-title').dataset.edited = '';
+    const titleInput = document.getElementById('mat-title');
+    titleInput.dataset.edited = '';
+    titleInput.value = `${subject} ${chapter} Unit Test`;
+
+    setTimeout(() => { msgEl.textContent = ''; }, 4000);
+  } catch (err) {
+    progWrap.style.display = 'none';
+    msgEl.textContent = '업로드 오류: ' + err.message;
+    msgEl.className = 'mat-msg error';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '업로드';
+  }
+}
+
+// ── 접근 토글 (전역 — inline onclick에서 호출) ─────────────────────
+window.matToggleAccess = async function (materialId, email, checked) {
+  try {
+    await updateDoc(doc(db, 'materials', materialId), {
+      allowedEmails: checked ? arrayUnion(email) : arrayRemove(email)
+    });
+  } catch (err) {
+    alert('권한 변경 오류: ' + err.message);
+  }
+};
+
+// ── 접근 패널 열기/닫기 ────────────────────────────────────────
+window.matTogglePanel = function (materialId) {
+  const panel = document.getElementById('mat-panel-' + materialId);
+  if (!panel) return;
+  const isOpen = panel.style.display !== 'none';
+  panel.style.display = isOpen ? 'none' : 'block';
+  // 버튼 텍스트 반영
+  const btn = document.querySelector(`#matcard-${materialId} .btn-sm`);
+  if (btn) btn.textContent = isOpen ? '접근 설정 ▾' : '접근 설정 ▴';
+};
+
+// ── 파일 삭제 ──────────────────────────────────────────────────
+window.matDelete = async function (materialId, storagePath) {
+  if (!confirm('이 파일을 삭제하면 모든 학생의 접근이 해제됩니다.\n정말 삭제하시겠습니까?')) return;
+  try {
+    if (storagePath) {
+      await deleteObject(storageRef(storage, storagePath)).catch(() => {});
+    }
+    await deleteDoc(doc(db, 'materials', materialId));
+  } catch (err) {
+    alert('삭제 오류: ' + err.message);
+  }
+};
