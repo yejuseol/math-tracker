@@ -513,7 +513,11 @@ function renderDashboard() {
     sub.textContent = '전체 학생 현황';
   }
 
-  const recent = [...filteredScores].sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 10);
+  const recent = [...filteredScores].sort((a, b) => {
+    const d = (b.date || '').localeCompare(a.date || '');
+    if (d !== 0) return d;
+    return (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0);
+  }).slice(0, 10);
   const tbody  = document.getElementById('recent-tbody');
   const empty  = document.getElementById('recent-empty');
   if (recent.length === 0) {
@@ -1087,7 +1091,11 @@ function renderStats() {
     }
   });
 
-  const trendData    = [...filteredScores].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const trendData = [...filteredScores].sort((a, b) => {
+    const d = (a.date || '').localeCompare(b.date || '');
+    if (d !== 0) return d;
+    return (a.createdAt?.toMillis?.() || 0) - (b.createdAt?.toMillis?.() || 0);
+  });
   const multiStudent = studentFilter === 'all' && students.length > 1 && currentRole === 'teacher';
   if (chartTrend) chartTrend.destroy();
 
