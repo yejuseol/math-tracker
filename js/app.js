@@ -257,6 +257,9 @@ let unsubStudents  = null;
 let unsubScores    = null;
 let unsubMaterials = null;
 let matAdminFilter = 'all'; // 자료 관리 탭 과목 필터
+let studySlots     = [];
+let studyBookings  = {};   // { slotId: booking[] }
+let unsubStudySlots = null;
 let currentRole        = 'teacher';
 let currentStudentView = null;
 let activeSubject = '';
@@ -398,8 +401,9 @@ document.getElementById('btn-signup').addEventListener('click', async () => {
 });
 
 document.getElementById('btn-logout').addEventListener('click', async () => {
-  if (unsubStudents) { unsubStudents(); unsubStudents = null; }
-  if (unsubScores)   { unsubScores();   unsubScores   = null; }
+  if (unsubStudents)   { unsubStudents();   unsubStudents   = null; }
+  if (unsubScores)     { unsubScores();     unsubScores     = null; }
+  if (unsubStudySlots) { unsubStudySlots(); unsubStudySlots = null; }
   await signOut(auth);
 });
 
@@ -445,7 +449,7 @@ onAuthStateChanged(auth, async (user) => {
     initApp();
   } else {
     currentUser = null; currentUserProfile = null;
-    students = []; scores = [];
+    students = []; scores = []; studySlots = []; studyBookings = {};
     if (chartChapter) { chartChapter.destroy(); chartChapter = null; }
     if (chartDist)    { chartDist.destroy();    chartDist    = null; }
     if (chartTrend)   { chartTrend.destroy();   chartTrend   = null; }
@@ -491,9 +495,10 @@ function initApp() {
 
 // ── FIRESTORE LISTENERS ────────────────────────────────────────
 function setupFirestoreListeners() {
-  if (unsubStudents)  unsubStudents();
-  if (unsubScores)    unsubScores();
-  if (unsubMaterials) unsubMaterials();
+  if (unsubStudents)   unsubStudents();
+  if (unsubScores)     unsubScores();
+  if (unsubMaterials)  unsubMaterials();
+  if (unsubStudySlots) unsubStudySlots();
 
   unsubStudents = onSnapshot(collection(db, 'students'), snap => {
     students = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -534,10 +539,12 @@ function setupFirestoreListeners() {
     renderMaterials();
     if (isTeacher) renderMaterialsAdmin();
   });
+
+  setupStudyListeners();
 }
 
 // ── NAVIGATION ─────────────────────────────────────────────────
-const views = ['dashboard', 'add-score', 'students', 'stats', 'materials', 'materials-admin'];
+const views = ['dashboard', 'add-score', 'students', 'stats', 'materials', 'materials-admin', 'study'];
 function showView(name) {
   views.forEach(v => {
     document.getElementById('view-' + v)?.classList.toggle('active', v === name);
@@ -550,6 +557,7 @@ function showView(name) {
   if (name === 'stats')            renderStats();
   if (name === 'materials')        renderMaterials();
   if (name === 'materials-admin') { renderMaterialsAdmin(); initMaterialsUploadForm(); }
+  if (name === 'study')            renderStudy();
 }
 document.querySelectorAll('[data-view]').forEach(el => {
   el.addEventListener('click', e => { e.preventDefault(); showView(el.dataset.view); });
@@ -1568,4 +1576,458 @@ window.matDelete = async function (materialId, storagePath) {
   } catch (err) {
     alert('삭제 오류: ' + err.message);
   }
+};
+
+// ══════════════════════════════════════════════════════════════
+// ── STUDY WITH ME — 공부 세션 예약 ─────────────────────────────
+// ══════════════════════════════════════════════════════════════
+//
+// ▶ EmailJS 설정 (아래 5개 값을 본인 계정 정보로 교체하세요)
+//   https://www.emailjs.com 에서 무료 계정 생성 후:
+//     1. Email Services 탭 → Service ID 확인
+//     2. Email Templates 탭 → 학생용 / 선생님용 템플릿 각각 생성 후 Template ID 확인
+//     3. Account 탭 → Public Key 확인
+//
+//   학생 템플릿 변수: {{to_name}}, {{to_email}}, {{session_date}},
+//                     {{session_time}}, {{zoom_link}}, {{session_note}}, {{action}}
+//   선생님 템플릿 변수: {{to_email}}, {{student_name}}, {{student_email}},
+//                       {{session_date}}, {{session_time}}, {{session_note}}, {{action}}
+//
+const EMAILJS_PUBLIC_KEY       = 'YOUR_PUBLIC_KEY';           // ← 교체하세요
+const EMAILJS_SERVICE_ID       = 'YOUR_SERVICE_ID';           // ← 교체하세요
+const EMAILJS_TEMPLATE_STUDENT = 'YOUR_STUDENT_TEMPLATE_ID'; // ← 교체하세요
+const EMAILJS_TEMPLATE_TEACHER = 'YOUR_TEACHER_TEMPLATE_ID'; // ← 교체하세요
+const TEACHER_EMAIL            = 'your@email.com';            // ← 교체하세요
+
+// ── EmailJS 초기화 + 발송 헬퍼 ─────────────────────────────────
+let _emailJsInit = false;
+
+async function sendStudyEmail(templateId, params) {
+  // 미설정이면 조용히 skip (예약은 항상 정상 완료)
+  if (!EMAILJS_PUBLIC_KEY || EMAILJS_PUBLIC_KEY === 'YOUR_PUBLIC_KEY') return;
+  if (!EMAILJS_SERVICE_ID || EMAILJS_SERVICE_ID === 'YOUR_SERVICE_ID') return;
+  if (typeof emailjs === 'undefined') return;
+  try {
+    if (!_emailJsInit) {
+      emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+      _emailJsInit = true;
+    }
+    await emailjs.send(EMAILJS_SERVICE_ID, templateId, params);
+  } catch (err) {
+    // 이메일 실패해도 예약 자체는 정상 완료 — 콘솔 경고만 출력
+    console.warn('[Study with Me] 이메일 발송 실패 (예약은 정상 완료됨):', err?.text || err?.message || err);
+  }
+}
+
+// ── 날짜 / 시간 포맷 헬퍼 ──────────────────────────────────────
+function fmtDate(dateStr) {
+  if (!dateStr) return '';
+  const days = ['일','월','화','수','목','금','토'];
+  const d    = new Date(dateStr + 'T12:00:00'); // 정오로 TZ 오류 방지
+  return `${dateStr} (${days[d.getDay()]})`;
+}
+function fmtTime(start, end) {
+  if (start && end) return `${start} – ${end}`;
+  return start || end || '';
+}
+
+// ── Firestore 리스너 ───────────────────────────────────────────
+function setupStudyListeners() {
+  if (unsubStudySlots) unsubStudySlots();
+
+  unsubStudySlots = onSnapshot(collection(db, 'studySlots'), async snap => {
+    studySlots = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // 날짜 + 시작시간 오름차순 정렬
+    studySlots.sort((a, b) =>
+      ((a.date || '') + (a.startTime || '')).localeCompare((b.date || '') + (b.startTime || ''))
+    );
+    // 모든 슬롯의 bookings 서브컬렉션 일괄 조회
+    const fetches = studySlots.map(s =>
+      getDocs(collection(db, 'studySlots', s.id, 'bookings'))
+        .then(bSnap => [s.id, bSnap.docs.map(d => ({ id: d.id, ...d.data() }))])
+        .catch(() => [s.id, []])
+    );
+    const results = await Promise.all(fetches);
+    studyBookings = Object.fromEntries(results);
+    renderStudy();
+  });
+}
+
+// ── 메인 렌더 라우터 ───────────────────────────────────────────
+function renderStudy() {
+  const container = document.getElementById('study-content');
+  if (!container) return;
+  const isTeacher = currentUserProfile?.role === 'teacher';
+  if (isTeacher) {
+    renderStudyTeacher(container);
+  } else {
+    renderStudyStudent(container);
+  }
+}
+
+// ── 선생님 뷰: 세션 등록 폼 + 목록 ──────────────────────────────
+function renderStudyTeacher(container) {
+  const today = new Date().toISOString().split('T')[0];
+
+  const slotCards = studySlots.length === 0
+    ? `<div class="empty-state">등록된 세션이 없습니다. 위 폼에서 새 세션을 등록해주세요.</div>`
+    : studySlots.map(s => {
+        const bk      = studyBookings[s.id] || [];
+        const isFull  = bk.length >= s.maxCapacity;
+        const badgeCls = isFull ? 'badge-red' : bk.length > 0 ? 'badge-amber' : 'badge-green';
+
+        const bookingItems = bk.map(b => {
+          const safeId   = (b.studentUid || '').replace(/'/g, "\\'");
+          const safeName = (b.studentName || '—').replace(/'/g, "\\'");
+          return `
+            <div class="swm-booking-row">
+              <div class="swm-booking-avatar">${initials(b.studentName || b.studentEmail || '?')}</div>
+              <div class="swm-booking-info">
+                <div class="swm-booking-name">${b.studentName || '—'}</div>
+                <div class="swm-booking-email">${b.studentEmail || '—'}</div>
+              </div>
+              <button class="btn-sm btn-danger-sm"
+                onclick="swmCancel('${s.id}','${safeId}','${safeName}',true)">취소</button>
+            </div>`;
+        }).join('');
+
+        return `
+          <div class="swm-slot-card" id="swmcard-${s.id}">
+            <div class="swm-slot-inner">
+              <div class="swm-slot-left">
+                <div class="swm-slot-date">${fmtDate(s.date)}</div>
+                <div class="swm-slot-time">${fmtTime(s.startTime, s.endTime)}</div>
+                ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
+              </div>
+              <div class="swm-slot-right">
+                <span class="badge ${badgeCls}">${bk.length} / ${s.maxCapacity}명</span>
+                <a href="${s.zoomLink}" target="_blank" rel="noopener" class="btn-sm btn-accent-sm">🔗 Zoom</a>
+                <button class="btn-sm swm-toggle-btn"
+                  onclick="swmToggleBookings('${s.id}')">예약자 ▾</button>
+                <button class="btn-sm btn-danger-sm"
+                  onclick="swmDeleteSlot('${s.id}')">삭제</button>
+              </div>
+            </div>
+            <div class="swm-bookings-panel" id="swm-panel-${s.id}" style="display:none">
+              ${bookingItems || '<div class="empty-sub">예약자가 없습니다.</div>'}
+            </div>
+          </div>`;
+      }).join('');
+
+  container.innerHTML = `
+    <div class="form-card swm-form-card">
+      <div class="section-title" style="margin-bottom:1rem">새 세션 등록</div>
+      <div class="field-row">
+        <div class="field-group">
+          <label class="field-label">날짜 <span class="req">*</span></label>
+          <input type="date" id="swm-date" min="${today}" value="${today}">
+        </div>
+        <div class="field-group">
+          <label class="field-label">시작 시간 <span class="req">*</span></label>
+          <input type="time" id="swm-start">
+        </div>
+        <div class="field-group">
+          <label class="field-label">종료 시간 <span class="req">*</span></label>
+          <input type="time" id="swm-end">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field-group" style="flex:2">
+          <label class="field-label">Zoom 링크 <span class="req">*</span></label>
+          <input type="url" id="swm-zoom" placeholder="https://zoom.us/j/...">
+        </div>
+        <div class="field-group" style="flex:0 0 120px;min-width:100px">
+          <label class="field-label">최대 인원</label>
+          <input type="number" id="swm-cap" value="3" min="1" max="20">
+        </div>
+      </div>
+      <div class="field-group" style="margin-bottom:14px">
+        <label class="field-label">메모 (선택)</label>
+        <textarea id="swm-note" rows="2"
+          placeholder="예: AP Calculus 숙제 도움 가능, 질문 환영"></textarea>
+      </div>
+      <div class="form-actions">
+        <button class="btn-primary" id="btn-swm-save">세션 등록</button>
+        <div id="swm-save-msg" style="font-size:13px;font-weight:500"></div>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top:2rem;margin-bottom:1rem">등록된 세션</div>
+    <div id="swm-slots-list">${slotCards}</div>
+  `;
+
+  // 매 렌더마다 리스너 fresh 부착
+  document.getElementById('btn-swm-save')?.addEventListener('click', saveStudySlot);
+}
+
+// ── 학생/학부모 뷰 ─────────────────────────────────────────────
+function renderStudyStudent(container) {
+  const today = new Date().toISOString().split('T')[0];
+  const uid   = currentUser?.uid;
+
+  // 오늘 이후(오늘 포함) 세션만 표시
+  const upcoming = studySlots.filter(s => (s.date || '') >= today);
+
+  // 내가 예약한 세션
+  const mySlots = upcoming.filter(s =>
+    (studyBookings[s.id] || []).some(b => b.studentUid === uid)
+  );
+
+  // ── 내 예약 현황 ──
+  const mySection = mySlots.length === 0 ? '' : `
+    <div class="swm-my-section">
+      <div class="section-title" style="margin-bottom:.875rem">내 예약 현황</div>
+      ${mySlots.map(s => `
+        <div class="swm-my-card">
+          <div class="swm-my-info">
+            <div class="swm-slot-date">${fmtDate(s.date)}</div>
+            <div class="swm-slot-time">${fmtTime(s.startTime, s.endTime)}</div>
+            ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
+          </div>
+          <div class="swm-my-actions">
+            <a href="${s.zoomLink}" target="_blank" rel="noopener"
+               class="btn-primary swm-zoom-btn">🎬 Zoom 입장</a>
+            <button class="btn-secondary"
+              onclick="swmCancel('${s.id}','${uid}','${(currentUserProfile?.name||'').replace(/'/g,"\\'")}',false)">
+              예약 취소
+            </button>
+          </div>
+        </div>`).join('')}
+    </div>`;
+
+  // ── 예약 가능 세션 목록 ──
+  let availHtml;
+  if (upcoming.length === 0) {
+    availHtml = `
+      <div class="empty-state" style="padding:3rem 1rem">
+        <div style="font-size:2rem;margin-bottom:.5rem">📅</div>
+        <div>예약 가능한 세션이 없습니다.</div>
+        <div style="font-size:.85rem;color:var(--text-3);margin-top:.25rem">
+          선생님이 세션을 등록하면 여기에 표시됩니다.
+        </div>
+      </div>`;
+  } else {
+    availHtml = upcoming.map(s => {
+      const bk          = studyBookings[s.id] || [];
+      const isMyBooking = bk.some(b => b.studentUid === uid);
+      const isFull      = bk.length >= s.maxCapacity;
+      const remaining   = s.maxCapacity - bk.length;
+
+      let badgeHtml, btnHtml;
+      if (isMyBooking) {
+        badgeHtml = `<span class="badge badge-green">✓ 예약 완료</span>`;
+        btnHtml   = `<button class="btn-secondary" disabled
+                       style="opacity:.65;cursor:default;font-size:12.5px">예약됨</button>`;
+      } else if (isFull) {
+        badgeHtml = `<span class="badge badge-red">마감</span>`;
+        btnHtml   = `<button class="btn-sm" disabled
+                       style="opacity:.45;cursor:not-allowed">마감</button>`;
+      } else {
+        badgeHtml = `<span class="badge badge-green">${remaining}자리 남음</span>`;
+        btnHtml   = `<button class="btn-primary btn-sm"
+                       data-book="${s.id}"
+                       onclick="swmBook('${s.id}')">예약하기</button>`;
+      }
+
+      return `
+        <div class="swm-slot-card ${isMyBooking ? 'swm-slot-booked' : ''}">
+          <div class="swm-slot-inner">
+            <div class="swm-slot-left">
+              <div class="swm-slot-date">${fmtDate(s.date)}</div>
+              <div class="swm-slot-time">${fmtTime(s.startTime, s.endTime)}</div>
+              ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
+            </div>
+            <div class="swm-slot-right">
+              ${badgeHtml}
+              ${btnHtml}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  container.innerHTML = `
+    ${mySection}
+    <div class="section-title"
+         style="margin-top:${mySlots.length ? '2rem' : '0'};margin-bottom:1rem">
+      예약 가능한 세션
+    </div>
+    <div id="swm-avail-list">${availHtml}</div>
+  `;
+}
+
+// ── 세션 등록 (선생님) ─────────────────────────────────────────
+async function saveStudySlot() {
+  const date  = document.getElementById('swm-date')?.value;
+  const start = document.getElementById('swm-start')?.value;
+  const end   = document.getElementById('swm-end')?.value;
+  const zoom  = document.getElementById('swm-zoom')?.value.trim();
+  const cap   = parseInt(document.getElementById('swm-cap')?.value) || 3;
+  const note  = document.getElementById('swm-note')?.value.trim() || '';
+  const msgEl = document.getElementById('swm-save-msg');
+  const btn   = document.getElementById('btn-swm-save');
+
+  msgEl.textContent = '';
+  if (!date || !start || !end || !zoom) {
+    msgEl.textContent = '날짜, 시작/종료 시간, Zoom 링크를 모두 입력해주세요.';
+    msgEl.style.color = 'var(--red)';
+    return;
+  }
+  if (start >= end) {
+    msgEl.textContent = '종료 시간은 시작 시간보다 늦어야 합니다.';
+    msgEl.style.color = 'var(--red)';
+    return;
+  }
+
+  btn.disabled = true; btn.textContent = '등록 중...';
+  try {
+    await addDoc(collection(db, 'studySlots'), {
+      date, startTime: start, endTime: end,
+      zoomLink: zoom, maxCapacity: cap, note,
+      createdAt: serverTimestamp(), createdBy: currentUser.uid,
+    });
+    // 폼 리셋 (날짜는 유지)
+    document.getElementById('swm-start').value = '';
+    document.getElementById('swm-end').value   = '';
+    document.getElementById('swm-zoom').value  = '';
+    document.getElementById('swm-cap').value   = '3';
+    document.getElementById('swm-note').value  = '';
+    msgEl.textContent = '✓ 세션이 등록됐습니다!';
+    msgEl.style.color = 'var(--green)';
+    setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 3000);
+    // onSnapshot이 자동으로 목록 갱신
+  } catch (err) {
+    msgEl.textContent = '등록 오류: ' + err.message;
+    msgEl.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false; btn.textContent = '세션 등록';
+  }
+}
+
+// ── 예약하기 (학생) ────────────────────────────────────────────
+window.swmBook = async function (slotId) {
+  if (!currentUser || !currentUserProfile) return;
+  const slot = studySlots.find(s => s.id === slotId);
+  if (!slot) return;
+
+  const bk = studyBookings[slotId] || [];
+  if (bk.length >= slot.maxCapacity) { alert('이미 마감된 세션입니다.'); return; }
+  if (bk.some(b => b.studentUid === currentUser.uid)) { alert('이미 예약된 세션입니다.'); return; }
+
+  // 버튼 즉시 비활성화 (중복 클릭 방지)
+  const btn = document.querySelector(`[data-book="${slotId}"]`);
+  if (btn) { btn.disabled = true; btn.textContent = '예약 중...'; }
+
+  try {
+    const bookingData = {
+      studentUid:   currentUser.uid,
+      studentName:  currentUserProfile.name || currentUser.email,
+      studentEmail: currentUser.email,
+      bookedAt:     serverTimestamp(),
+    };
+    await setDoc(
+      doc(db, 'studySlots', slotId, 'bookings', currentUser.uid),
+      bookingData
+    );
+
+    // 로컬 상태 즉시 반영 (subcollection 변경은 onSnapshot 미감지)
+    if (!studyBookings[slotId]) studyBookings[slotId] = [];
+    studyBookings[slotId].push({
+      id: currentUser.uid, ...bookingData,
+    });
+    renderStudy();
+
+    // 이메일 발송 (비동기, 실패해도 예약 영향 없음)
+    const base = {
+      session_date: fmtDate(slot.date),
+      session_time: fmtTime(slot.startTime, slot.endTime),
+      zoom_link:    slot.zoomLink,
+      session_note: slot.note || '—',
+      action:       '예약 확인',
+    };
+    sendStudyEmail(EMAILJS_TEMPLATE_STUDENT, {
+      ...base,
+      to_email: currentUser.email,
+      to_name:  currentUserProfile.name || currentUser.email,
+    });
+    sendStudyEmail(EMAILJS_TEMPLATE_TEACHER, {
+      ...base,
+      to_email:     TEACHER_EMAIL,
+      student_name:  currentUserProfile.name || currentUser.email,
+      student_email: currentUser.email,
+      action:       '새 예약 알림',
+    });
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = '예약하기'; }
+    alert('예약 오류: ' + err.message);
+  }
+};
+
+// ── 예약 취소 (학생 본인 / 선생님) ────────────────────────────
+window.swmCancel = async function (slotId, uid, studentName, isTeacherAction) {
+  const slot = studySlots.find(s => s.id === slotId);
+  const msg  = isTeacherAction
+    ? `${studentName} 학생의 예약을 취소하시겠습니까?`
+    : '예약을 취소하시겠습니까?';
+  if (!confirm(msg)) return;
+
+  try {
+    await deleteDoc(doc(db, 'studySlots', slotId, 'bookings', uid));
+    if (studyBookings[slotId]) {
+      studyBookings[slotId] = studyBookings[slotId].filter(b => b.studentUid !== uid);
+    }
+    renderStudy();
+
+    // 학생이 직접 취소할 때만 이메일 발송
+    if (!isTeacherAction && slot) {
+      const base = {
+        session_date: fmtDate(slot.date),
+        session_time: fmtTime(slot.startTime, slot.endTime),
+        zoom_link:    slot.zoomLink,
+        session_note: slot.note || '—',
+        action:       '예약 취소 확인',
+      };
+      sendStudyEmail(EMAILJS_TEMPLATE_STUDENT, {
+        ...base,
+        to_email: currentUser.email,
+        to_name:  currentUserProfile?.name || currentUser.email,
+      });
+      sendStudyEmail(EMAILJS_TEMPLATE_TEACHER, {
+        ...base,
+        to_email:     TEACHER_EMAIL,
+        student_name:  currentUserProfile?.name || currentUser.email,
+        student_email: currentUser.email,
+        action:       '예약 취소 알림',
+      });
+    }
+  } catch (err) {
+    alert('취소 오류: ' + err.message);
+  }
+};
+
+// ── 세션 삭제 (선생님) ─────────────────────────────────────────
+window.swmDeleteSlot = async function (slotId) {
+  if (!confirm('이 세션을 삭제하시겠습니까?\n예약한 학생들의 예약도 모두 취소됩니다.')) return;
+  try {
+    const batch    = writeBatch(db);
+    const bookings = studyBookings[slotId] || [];
+    bookings.forEach(b =>
+      batch.delete(doc(db, 'studySlots', slotId, 'bookings', b.id))
+    );
+    batch.delete(doc(db, 'studySlots', slotId));
+    await batch.commit();
+    // onSnapshot이 자동으로 상태/렌더 갱신
+  } catch (err) {
+    alert('삭제 오류: ' + err.message);
+  }
+};
+
+// ── 예약자 패널 토글 (선생님) ──────────────────────────────────
+window.swmToggleBookings = function (slotId) {
+  const panel = document.getElementById('swm-panel-' + slotId);
+  if (!panel) return;
+  const isOpen = panel.style.display !== 'none';
+  panel.style.display = isOpen ? 'none' : 'block';
+  const btn = document.querySelector(`#swmcard-${slotId} .swm-toggle-btn`);
+  if (btn) btn.textContent = isOpen ? '예약자 ▾' : '예약자 ▴';
 };
