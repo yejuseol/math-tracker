@@ -1078,6 +1078,20 @@ input[type=url]:focus, input[type=time]:focus {
 .stage-map-title {
   font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -.01em;
 }
+.stage-map-header-left {
+  display: flex; align-items: center; gap: .625rem; flex-wrap: wrap;
+}
+.stage-student-pick {
+  font-size: 13px; font-weight: 600; color: var(--text-1);
+  background: var(--surface2); border: 1.5px solid var(--border-md);
+  border-radius: var(--radius-sm); padding: 4px 10px;
+  cursor: pointer; outline: none; transition: border-color .15s;
+}
+.stage-student-pick:focus,
+.stage-student-pick:hover { border-color: var(--accent); }
+.stage-map-student-name {
+  font-size: 13px; font-weight: 600; color: var(--accent-dark);
+}
 .stage-map-summary {
   font-size: 12px; font-weight: 600; color: var(--text-2);
   background: var(--surface2); border: 1px solid var(--border-md);
