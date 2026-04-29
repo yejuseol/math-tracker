@@ -691,26 +691,42 @@ function renderStageMap() {
   const wrap = document.getElementById('stage-map-wrap');
   if (!wrap) return;
 
-  // 특정 학생이 선택된 경우에만 표시
   const isTeacher = currentRole === 'teacher';
-  if (isTeacher && !currentStudentView) { wrap.innerHTML = ''; return; }
+
+  // 선생님: 학생 없으면 첫 번째 학생 자동 선택
+  if (isTeacher && !currentStudentView && students.length > 0) {
+    currentStudentView = students[0].id;
+  }
+  if (!currentStudentView) { wrap.innerHTML = ''; return; }
+
   const studentId = currentStudentView;
-  if (!studentId) { wrap.innerHTML = ''; return; }
+
+  // 선생님 모드용 학생 선택 드롭다운 HTML
+  const studentPickerHtml = isTeacher && students.length > 1 ? `
+    <select id="stage-student-pick" class="stage-student-pick">
+      ${students.map(s => `<option value="${s.id}" ${s.id === studentId ? 'selected' : ''}>${s.name}</option>`).join('')}
+    </select>` : (isTeacher && students.length === 1
+      ? `<span class="stage-map-student-name">${students[0]?.name || ''}</span>`
+      : '');
 
   // 해당 학생 점수 전체
   const stu = scores.filter(s => s.studentId === studentId);
 
-  // 점수 없음 → 안내 문구
+  // 점수 없음 → 안내 문구 (선생님이면 학생 선택 드롭다운은 유지)
   if (stu.length === 0) {
     wrap.innerHTML = `
       <div class="stage-map">
         <div class="stage-map-header">
           <span class="stage-map-title">🗺️ My Stage Map</span>
+          ${studentPickerHtml}
         </div>
         <div class="empty-state" style="padding:1.5rem;text-align:center;font-size:13.5px">
           아직 테스트 기록이 없어요. 첫 번째 스테이지에 도전해보세요! 🚀
         </div>
       </div>`;
+    document.getElementById('stage-student-pick')?.addEventListener('change', e => {
+      currentStudentView = e.target.value; renderStageMap();
+    });
     return;
   }
 
@@ -784,7 +800,10 @@ function renderStageMap() {
   wrap.innerHTML = `
     <div class="stage-map">
       <div class="stage-map-header">
-        <span class="stage-map-title">🗺️ My Stage Map</span>
+        <div class="stage-map-header-left">
+          <span class="stage-map-title">🗺️ My Stage Map</span>
+          ${studentPickerHtml}
+        </div>
         <span class="stage-map-summary">${totalCleared} / ${totalStages} 스테이지 클리어</span>
       </div>
       <div class="stage-progress-bar">
@@ -792,6 +811,12 @@ function renderStageMap() {
       </div>
       ${sectionsHtml}
     </div>`;
+
+  // 학생 선택 드롭다운 이벤트 (선생님 전용)
+  document.getElementById('stage-student-pick')?.addEventListener('change', e => {
+    currentStudentView = e.target.value;
+    renderStageMap();
+  });
 }
 
 window.navigateToStageStats = function(subject, studentId) {
