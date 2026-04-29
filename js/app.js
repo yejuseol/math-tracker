@@ -1578,15 +1578,13 @@ window.matDelete = async function (materialId, storagePath) {
   }
 };
 
+
 // ══════════════════════════════════════════════════════════════
-// ── STUDY WITH ME — 공부 세션 예약 ─────────────────────────────
+// ── STUDY WITH ME — 시간 슬롯 선택 예약 ────────────────────────
 // ══════════════════════════════════════════════════════════════
 //
-// ▶ EmailJS 설정 (아래 5개 값을 본인 계정 정보로 교체하세요)
-//   https://www.emailjs.com 에서 무료 계정 생성 후:
-//     1. Email Services 탭 → Service ID 확인
-//     2. Email Templates 탭 → 학생용 / 선생님용 템플릿 각각 생성 후 Template ID 확인
-//     3. Account 탭 → Public Key 확인
+// ▶ EmailJS 설정 — 아래 5개 상수를 본인 계정 정보로 교체하세요.
+//   https://www.emailjs.com
 //
 //   학생 템플릿 변수: {{to_name}}, {{to_email}}, {{session_date}},
 //                     {{session_time}}, {{zoom_link}}, {{session_note}}, {{action}}
@@ -1599,92 +1597,144 @@ const EMAILJS_TEMPLATE_STUDENT = 'template_o1ql2gl';
 const EMAILJS_TEMPLATE_TEACHER = 'template_ossvrgq';
 const TEACHER_EMAIL            = 'yeju.seol572@gmail.com';
 
-// ── EmailJS 초기화 + 발송 헬퍼 ─────────────────────────────────
-let _emailJsInit = false;
+// ── 추가 상태 ──────────────────────────────────────────────────
+let teacherSlotPreview    = [];   // 폼에서 생성 중인 슬롯 목록
+let studentSlotSelections = {};   // { slotId: string[] } 학생 토글 상태
 
+// ── EmailJS 헬퍼 ───────────────────────────────────────────────
+let _emailJsInit = false;
 async function sendStudyEmail(templateId, params) {
-  // 미설정이면 조용히 skip (예약은 항상 정상 완료)
   if (!EMAILJS_PUBLIC_KEY || EMAILJS_PUBLIC_KEY === 'YOUR_PUBLIC_KEY') return;
   if (!EMAILJS_SERVICE_ID || EMAILJS_SERVICE_ID === 'YOUR_SERVICE_ID') return;
   if (typeof emailjs === 'undefined') return;
   try {
-    if (!_emailJsInit) {
-      emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
-      _emailJsInit = true;
-    }
+    if (!_emailJsInit) { emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY }); _emailJsInit = true; }
     await emailjs.send(EMAILJS_SERVICE_ID, templateId, params);
   } catch (err) {
-    // 이메일 실패해도 예약 자체는 정상 완료 — 콘솔 경고만 출력
     console.warn('[Study with Me] 이메일 발송 실패 (예약은 정상 완료됨):', err?.text || err?.message || err);
   }
 }
 
-// ── 날짜 / 시간 포맷 헬퍼 ──────────────────────────────────────
+// ── 시간 유틸 ──────────────────────────────────────────────────
+function generateTimeSlots(startTime, endTime) {
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+  let cur = sh * 60 + sm;
+  const end = eh * 60 + em;
+  const slots = [];
+  while (cur < end) {
+    slots.push(`${String(Math.floor(cur/60)).padStart(2,'0')}:${String(cur%60).padStart(2,'0')}`);
+    cur += 30;
+  }
+  return slots;
+}
+
+function fmtSlotRange(slots) {
+  if (!slots || slots.length === 0) return '—';
+  const sorted = [...slots].sort();
+  const last = sorted[sorted.length - 1];
+  const [h, m] = last.split(':').map(Number);
+  const endMin = h * 60 + m + 30;
+  const end = `${String(Math.floor(endMin/60)).padStart(2,'0')}:${String(endMin%60).padStart(2,'0')}`;
+  return `${sorted[0]} – ${end}`;
+}
+
 function fmtDate(dateStr) {
   if (!dateStr) return '';
   const days = ['일','월','화','수','목','금','토'];
-  const d    = new Date(dateStr + 'T12:00:00'); // 정오로 TZ 오류 방지
+  const d = new Date(dateStr + 'T12:00:00');
   return `${dateStr} (${days[d.getDay()]})`;
 }
-function fmtTime(start, end) {
-  if (start && end) return `${start} – ${end}`;
-  return start || end || '';
+
+function getSlotOccupancy(slotId, slotTime) {
+  return (studyBookings[slotId] || []).filter(b => (b.selectedSlots || []).includes(slotTime)).length;
 }
 
 // ── Firestore 리스너 ───────────────────────────────────────────
 function setupStudyListeners() {
   if (unsubStudySlots) unsubStudySlots();
-
   unsubStudySlots = onSnapshot(collection(db, 'studySlots'), async snap => {
     studySlots = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    // 날짜 + 시작시간 오름차순 정렬
     studySlots.sort((a, b) =>
-      ((a.date || '') + (a.startTime || '')).localeCompare((b.date || '') + (b.startTime || ''))
+      ((a.date||'') + ((a.availableSlots||[])[0]||'')).localeCompare(
+       (b.date||'') + ((b.availableSlots||[])[0]||''))
     );
-    // 모든 슬롯의 bookings 서브컬렉션 일괄 조회
-    const fetches = studySlots.map(s =>
-      getDocs(collection(db, 'studySlots', s.id, 'bookings'))
-        .then(bSnap => [s.id, bSnap.docs.map(d => ({ id: d.id, ...d.data() }))])
-        .catch(() => [s.id, []])
+    const results = await Promise.all(
+      studySlots.map(s =>
+        getDocs(collection(db, 'studySlots', s.id, 'bookings'))
+          .then(bSnap => [s.id, bSnap.docs.map(d => ({ id: d.id, ...d.data() }))])
+          .catch(() => [s.id, []])
+      )
     );
-    const results = await Promise.all(fetches);
     studyBookings = Object.fromEntries(results);
     renderStudy();
   });
 }
 
-// ── 메인 렌더 라우터 ───────────────────────────────────────────
+// ── 렌더 라우터 ────────────────────────────────────────────────
 function renderStudy() {
   const container = document.getElementById('study-content');
   if (!container) return;
-  const isTeacher = currentUserProfile?.role === 'teacher';
-  if (isTeacher) {
+  if (currentUserProfile?.role === 'teacher') {
     renderStudyTeacher(container);
   } else {
     renderStudyStudent(container);
   }
 }
 
-// ── 선생님 뷰: 세션 등록 폼 + 목록 ──────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// ── 선생님 뷰 ──────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
 function renderStudyTeacher(container) {
   const today = new Date().toISOString().split('T')[0];
 
+  // ── 슬롯 미리보기 chips ──
+  const slotChipsHtml = teacherSlotPreview.length === 0
+    ? `<div style="font-size:12.5px;color:var(--text-3);padding:8px 0">
+         시작/종료 시간 입력 후 "슬롯 생성" 클릭
+       </div>`
+    : `<div class="swm-slot-chips">
+         ${teacherSlotPreview.map(t => `
+           <span class="swm-slot-chip">
+             ${t}
+             <button onclick="swmRemoveFormSlot('${t}')" title="제거">×</button>
+           </span>`).join('')}
+       </div>`;
+
+  // ── 등록된 세션 카드 ──
   const slotCards = studySlots.length === 0
     ? `<div class="empty-state">등록된 세션이 없습니다. 위 폼에서 새 세션을 등록해주세요.</div>`
     : studySlots.map(s => {
-        const bk      = studyBookings[s.id] || [];
-        const isFull  = bk.length >= s.maxCapacity;
-        const badgeCls = isFull ? 'badge-red' : bk.length > 0 ? 'badge-amber' : 'badge-green';
+        const bk          = studyBookings[s.id] || [];
+        const slots       = s.availableSlots || [];
+        const maxPerSlot  = s.maxPerSlot || 99;
+        const totalRange  = fmtSlotRange(slots);
 
+        // 슬롯별 점유율 바
+        const slotBars = slots.map(t => {
+          const occ    = getSlotOccupancy(s.id, t);
+          const pct    = maxPerSlot > 0 ? Math.round(occ / maxPerSlot * 100) : 0;
+          const full   = maxPerSlot > 0 && occ >= maxPerSlot;
+          return `<div class="swm-admin-slot" title="${t}: ${occ}/${maxPerSlot}명">
+            <span class="swm-admin-slot-time">${t}</span>
+            <div class="swm-admin-slot-bar">
+              <div class="swm-admin-slot-fill ${full ? 'full' : ''}" style="width:${Math.min(pct,100)}%"></div>
+            </div>
+            <span class="swm-admin-slot-count">${occ}</span>
+          </div>`;
+        }).join('');
+
+        // 예약자 목록
         const bookingItems = bk.map(b => {
-          const safeId   = (b.studentUid || '').replace(/'/g, "\\'");
-          const safeName = (b.studentName || '—').replace(/'/g, "\\'");
+          const safeId   = (b.studentUid||'').replace(/'/g,"\\'");
+          const safeName = (b.studentName||'—').replace(/'/g,"\\'");
+          const timeRange = fmtSlotRange(b.selectedSlots || []);
           return `
             <div class="swm-booking-row">
-              <div class="swm-booking-avatar">${initials(b.studentName || b.studentEmail || '?')}</div>
+              <div class="swm-booking-avatar">${initials(b.studentName||b.studentEmail||'?')}</div>
               <div class="swm-booking-info">
-                <div class="swm-booking-name">${b.studentName || '—'}</div>
-                <div class="swm-booking-email">${b.studentEmail || '—'}</div>
+                <div class="swm-booking-name">${b.studentName||'—'}</div>
+                <div class="swm-booking-email">${b.studentEmail||'—'} · ${timeRange}</div>
               </div>
               <button class="btn-sm btn-danger-sm"
                 onclick="swmCancel('${s.id}','${safeId}','${safeName}',true)">취소</button>
@@ -1696,18 +1746,22 @@ function renderStudyTeacher(container) {
             <div class="swm-slot-inner">
               <div class="swm-slot-left">
                 <div class="swm-slot-date">${fmtDate(s.date)}</div>
-                <div class="swm-slot-time">${fmtTime(s.startTime, s.endTime)}</div>
+                <div class="swm-slot-time">${totalRange}</div>
                 ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
               </div>
               <div class="swm-slot-right">
-                <span class="badge ${badgeCls}">${bk.length} / ${s.maxCapacity}명</span>
-                <a href="${s.zoomLink}" target="_blank" rel="noopener" class="btn-sm btn-accent-sm">🔗 Zoom</a>
+                <span class="badge ${bk.length > 0 ? 'badge-amber' : 'badge-green'}">
+                  예약 ${bk.length}명
+                </span>
+                <a href="${s.zoomLink}" target="_blank" rel="noopener"
+                   class="btn-sm btn-accent-sm">🔗 Zoom</a>
                 <button class="btn-sm swm-toggle-btn"
                   onclick="swmToggleBookings('${s.id}')">예약자 ▾</button>
                 <button class="btn-sm btn-danger-sm"
                   onclick="swmDeleteSlot('${s.id}')">삭제</button>
               </div>
             </div>
+            ${slots.length > 0 ? `<div class="swm-admin-slots-wrap">${slotBars}</div>` : ''}
             <div class="swm-bookings-panel" id="swm-panel-${s.id}" style="display:none">
               ${bookingItems || '<div class="empty-sub">예약자가 없습니다.</div>'}
             </div>
@@ -1724,23 +1778,34 @@ function renderStudyTeacher(container) {
         </div>
         <div class="field-group">
           <label class="field-label">시작 시간 <span class="req">*</span></label>
-          <input type="time" id="swm-start">
+          <input type="time" id="swm-range-start" step="1800">
         </div>
         <div class="field-group">
           <label class="field-label">종료 시간 <span class="req">*</span></label>
-          <input type="time" id="swm-end">
+          <input type="time" id="swm-range-end" step="1800">
+        </div>
+        <div class="field-group" style="flex:0 0 auto;justify-content:flex-end">
+          <label class="field-label" style="visibility:hidden">생성</label>
+          <button class="btn-secondary" id="btn-swm-gen" style="white-space:nowrap">슬롯 생성</button>
         </div>
       </div>
+
+      <div class="field-group" style="margin-bottom:14px">
+        <label class="field-label">시간 슬롯 (클릭해서 제거)</label>
+        <div id="swm-slot-preview">${slotChipsHtml}</div>
+      </div>
+
       <div class="field-row">
         <div class="field-group" style="flex:2">
           <label class="field-label">Zoom 링크 <span class="req">*</span></label>
           <input type="url" id="swm-zoom" placeholder="https://zoom.us/j/...">
         </div>
-        <div class="field-group" style="flex:0 0 120px;min-width:100px">
-          <label class="field-label">최대 인원</label>
+        <div class="field-group" style="flex:0 0 130px;min-width:100px">
+          <label class="field-label">슬롯당 최대 인원</label>
           <input type="number" id="swm-cap" value="3" min="1" max="20">
         </div>
       </div>
+
       <div class="field-group" style="margin-bottom:14px">
         <label class="field-label">메모 (선택)</label>
         <textarea id="swm-note" rows="2"
@@ -1756,32 +1821,113 @@ function renderStudyTeacher(container) {
     <div id="swm-slots-list">${slotCards}</div>
   `;
 
-  // 매 렌더마다 리스너 fresh 부착
+  // 이벤트 리스너
+  document.getElementById('btn-swm-gen')?.addEventListener('click', swmGenerateSlotsFromForm);
   document.getElementById('btn-swm-save')?.addEventListener('click', saveStudySlot);
 }
 
+function swmGenerateSlotsFromForm() {
+  const start = document.getElementById('swm-range-start')?.value;
+  const end   = document.getElementById('swm-range-end')?.value;
+  if (!start || !end) { alert('시작 시간과 종료 시간을 먼저 입력해주세요.'); return; }
+  if (start >= end)   { alert('종료 시간은 시작 시간보다 늦어야 합니다.'); return; }
+  teacherSlotPreview = generateTimeSlots(start, end);
+  // 미리보기만 갱신 (full re-render 없이)
+  const wrap = document.getElementById('swm-slot-preview');
+  if (wrap) wrap.innerHTML = teacherSlotPreview.length === 0
+    ? '<div style="font-size:12.5px;color:var(--text-3);padding:8px 0">슬롯이 없습니다.</div>'
+    : `<div class="swm-slot-chips">
+         ${teacherSlotPreview.map(t => `
+           <span class="swm-slot-chip">
+             ${t}
+             <button onclick="swmRemoveFormSlot('${t}')" title="제거">×</button>
+           </span>`).join('')}
+       </div>`;
+}
+
+window.swmRemoveFormSlot = function(time) {
+  teacherSlotPreview = teacherSlotPreview.filter(t => t !== time);
+  const wrap = document.getElementById('swm-slot-preview');
+  if (!wrap) return;
+  if (teacherSlotPreview.length === 0) {
+    wrap.innerHTML = '<div style="font-size:12.5px;color:var(--text-3);padding:8px 0">슬롯이 없습니다.</div>';
+    return;
+  }
+  wrap.innerHTML = `<div class="swm-slot-chips">
+    ${teacherSlotPreview.map(t => `
+      <span class="swm-slot-chip">
+        ${t}
+        <button onclick="swmRemoveFormSlot('${t}')" title="제거">×</button>
+      </span>`).join('')}
+  </div>`;
+};
+
+// ── 세션 저장 ──────────────────────────────────────────────────
+async function saveStudySlot() {
+  const date    = document.getElementById('swm-date')?.value;
+  const zoom    = document.getElementById('swm-zoom')?.value.trim();
+  const cap     = parseInt(document.getElementById('swm-cap')?.value) || 3;
+  const note    = document.getElementById('swm-note')?.value.trim() || '';
+  const msgEl   = document.getElementById('swm-save-msg');
+  const btn     = document.getElementById('btn-swm-save');
+
+  msgEl.textContent = '';
+  if (!date || !zoom) {
+    msgEl.textContent = '날짜와 Zoom 링크를 입력해주세요.';
+    msgEl.style.color = 'var(--red)'; return;
+  }
+  if (teacherSlotPreview.length === 0) {
+    msgEl.textContent = '슬롯을 먼저 생성해주세요.';
+    msgEl.style.color = 'var(--red)'; return;
+  }
+
+  btn.disabled = true; btn.textContent = '등록 중...';
+  try {
+    await addDoc(collection(db, 'studySlots'), {
+      date,
+      availableSlots: teacherSlotPreview,
+      maxPerSlot: cap,
+      zoomLink: zoom, note,
+      createdAt: serverTimestamp(), createdBy: currentUser.uid,
+    });
+    teacherSlotPreview = [];
+    document.getElementById('swm-range-start').value = '';
+    document.getElementById('swm-range-end').value   = '';
+    document.getElementById('swm-zoom').value        = '';
+    document.getElementById('swm-cap').value         = '3';
+    document.getElementById('swm-note').value        = '';
+    msgEl.textContent = '✓ 세션이 등록됐습니다!';
+    msgEl.style.color = 'var(--green)';
+    setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 3000);
+  } catch (err) {
+    msgEl.textContent = '등록 오류: ' + err.message;
+    msgEl.style.color = 'var(--red)';
+  } finally { btn.disabled = false; btn.textContent = '세션 등록'; }
+}
+
+// ══════════════════════════════════════════════════════════════
 // ── 학생/학부모 뷰 ─────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
 function renderStudyStudent(container) {
   const today = new Date().toISOString().split('T')[0];
   const uid   = currentUser?.uid;
-
-  // 오늘 이후(오늘 포함) 세션만 표시
   const upcoming = studySlots.filter(s => (s.date || '') >= today);
 
-  // 내가 예약한 세션
-  const mySlots = upcoming.filter(s =>
-    (studyBookings[s.id] || []).some(b => b.studentUid === uid)
-  );
+  // 내가 예약한 세션 (selectedSlots 있는 것)
+  const myBookedSlots = upcoming.flatMap(s => {
+    const myBk = (studyBookings[s.id] || []).find(b => b.studentUid === uid);
+    return myBk ? [{ session: s, booking: myBk }] : [];
+  });
 
   // ── 내 예약 현황 ──
-  const mySection = mySlots.length === 0 ? '' : `
+  const mySection = myBookedSlots.length === 0 ? '' : `
     <div class="swm-my-section">
       <div class="section-title" style="margin-bottom:.875rem">내 예약 현황</div>
-      ${mySlots.map(s => `
+      ${myBookedSlots.map(({ session: s, booking: bk }) => `
         <div class="swm-my-card">
           <div class="swm-my-info">
             <div class="swm-slot-date">${fmtDate(s.date)}</div>
-            <div class="swm-slot-time">${fmtTime(s.startTime, s.endTime)}</div>
+            <div class="swm-slot-time">${fmtSlotRange(bk.selectedSlots || [])}</div>
             ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
           </div>
           <div class="swm-my-actions">
@@ -1795,7 +1941,7 @@ function renderStudyStudent(container) {
         </div>`).join('')}
     </div>`;
 
-  // ── 예약 가능 세션 목록 ──
+  // ── 예약 가능 세션 ──
   let availHtml;
   if (upcoming.length === 0) {
     availHtml = `
@@ -1810,37 +1956,69 @@ function renderStudyStudent(container) {
     availHtml = upcoming.map(s => {
       const bk          = studyBookings[s.id] || [];
       const isMyBooking = bk.some(b => b.studentUid === uid);
-      const isFull      = bk.length >= s.maxCapacity;
-      const remaining   = s.maxCapacity - bk.length;
+      const slots       = s.availableSlots || [];
+      const maxPerSlot  = s.maxPerSlot || 99;
+      const myBk        = bk.find(b => b.studentUid === uid);
 
-      let badgeHtml, btnHtml;
-      if (isMyBooking) {
-        badgeHtml = `<span class="badge badge-green">✓ 예약 완료</span>`;
-        btnHtml   = `<button class="btn-secondary" disabled
-                       style="opacity:.65;cursor:default;font-size:12.5px">예약됨</button>`;
-      } else if (isFull) {
-        badgeHtml = `<span class="badge badge-red">마감</span>`;
-        btnHtml   = `<button class="btn-sm" disabled
-                       style="opacity:.45;cursor:not-allowed">마감</button>`;
-      } else {
-        badgeHtml = `<span class="badge badge-green">${remaining}자리 남음</span>`;
-        btnHtml   = `<button class="btn-primary btn-sm"
-                       data-book="${s.id}"
-                       onclick="swmBook('${s.id}')">예약하기</button>`;
-      }
+      // 학생의 현재 선택 상태 복원 (re-render 시 유지)
+      const sel = studentSlotSelections[s.id] || [];
+
+      // 슬롯 버튼 그리드
+      const slotBtns = slots.map(t => {
+        const occ    = getSlotOccupancy(s.id, t);
+        const full   = occ >= maxPerSlot;
+        const picked = sel.includes(t);
+        const myPick = isMyBooking && (myBk?.selectedSlots || []).includes(t);
+
+        let cls = 'swm-time-btn';
+        if (myPick)       cls += ' my-pick';
+        else if (picked)  cls += ' selected';
+        else if (full)    cls += ' full';
+
+        const disabled = isMyBooking || full;
+        return `<button class="${cls}"
+          ${disabled ? 'disabled' : `onclick="swmToggleStudentSlot('${s.id}','${t}')"`}
+          title="${occ}/${maxPerSlot}명">
+          <span class="swm-time-label">${t}</span>
+          <span class="swm-time-occ">${occ}/${maxPerSlot}</span>
+        </button>`;
+      }).join('');
+
+      // 선택 범위 요약
+      const selRange = sel.length > 0
+        ? `<div class="swm-sel-summary">
+             선택: <strong>${fmtSlotRange(sel)}</strong>
+             (${sel.length * 30}분)
+           </div>`
+        : '';
+
+      const bookBtn = isMyBooking
+        ? '' // 이미 예약됨 → 위 "내 예약 현황"에서 처리
+        : sel.length === 0
+          ? `<button class="btn-primary btn-sm" disabled style="opacity:.4;cursor:not-allowed">
+               슬롯을 선택하세요
+             </button>`
+          : `<button class="btn-primary btn-sm" data-book="${s.id}"
+               onclick="swmBook('${s.id}')">
+               예약하기 (${fmtSlotRange(sel)})
+             </button>`;
 
       return `
         <div class="swm-slot-card ${isMyBooking ? 'swm-slot-booked' : ''}">
-          <div class="swm-slot-inner">
-            <div class="swm-slot-left">
-              <div class="swm-slot-date">${fmtDate(s.date)}</div>
-              <div class="swm-slot-time">${fmtTime(s.startTime, s.endTime)}</div>
-              ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
+          <div class="swm-slot-inner" style="align-items:flex-start;flex-direction:column;gap:.75rem">
+            <div style="display:flex;justify-content:space-between;width:100%;flex-wrap:wrap;gap:.5rem">
+              <div>
+                <div class="swm-slot-date">${fmtDate(s.date)}</div>
+                <div class="swm-slot-time">${fmtSlotRange(slots)} 중 선택</div>
+                ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
+              </div>
+              ${isMyBooking
+                ? `<span class="badge badge-green" style="align-self:flex-start">✓ 예약 완료</span>`
+                : ''}
             </div>
-            <div class="swm-slot-right">
-              ${badgeHtml}
-              ${btnHtml}
-            </div>
+            <div class="swm-time-grid">${slotBtns}</div>
+            ${selRange}
+            <div>${bookBtn}</div>
           </div>
         </div>`;
     }).join('');
@@ -1848,110 +2026,70 @@ function renderStudyStudent(container) {
 
   container.innerHTML = `
     ${mySection}
-    <div class="section-title"
-         style="margin-top:${mySlots.length ? '2rem' : '0'};margin-bottom:1rem">
+    <div class="section-title" style="margin-top:${myBookedSlots.length?'2rem':'0'};margin-bottom:1rem">
       예약 가능한 세션
     </div>
     <div id="swm-avail-list">${availHtml}</div>
   `;
 }
 
-// ── 세션 등록 (선생님) ─────────────────────────────────────────
-async function saveStudySlot() {
-  const date  = document.getElementById('swm-date')?.value;
-  const start = document.getElementById('swm-start')?.value;
-  const end   = document.getElementById('swm-end')?.value;
-  const zoom  = document.getElementById('swm-zoom')?.value.trim();
-  const cap   = parseInt(document.getElementById('swm-cap')?.value) || 3;
-  const note  = document.getElementById('swm-note')?.value.trim() || '';
-  const msgEl = document.getElementById('swm-save-msg');
-  const btn   = document.getElementById('btn-swm-save');
+// ── 학생 슬롯 토글 ─────────────────────────────────────────────
+window.swmToggleStudentSlot = function(slotId, time) {
+  if (!studentSlotSelections[slotId]) studentSlotSelections[slotId] = [];
+  const sel = studentSlotSelections[slotId];
+  const idx = sel.indexOf(time);
+  if (idx === -1) sel.push(time);
+  else            sel.splice(idx, 1);
+  studentSlotSelections[slotId] = sel;
+  renderStudy(); // 선택 상태 반영
+};
 
-  msgEl.textContent = '';
-  if (!date || !start || !end || !zoom) {
-    msgEl.textContent = '날짜, 시작/종료 시간, Zoom 링크를 모두 입력해주세요.';
-    msgEl.style.color = 'var(--red)';
-    return;
-  }
-  if (start >= end) {
-    msgEl.textContent = '종료 시간은 시작 시간보다 늦어야 합니다.';
-    msgEl.style.color = 'var(--red)';
-    return;
-  }
-
-  btn.disabled = true; btn.textContent = '등록 중...';
-  try {
-    await addDoc(collection(db, 'studySlots'), {
-      date, startTime: start, endTime: end,
-      zoomLink: zoom, maxCapacity: cap, note,
-      createdAt: serverTimestamp(), createdBy: currentUser.uid,
-    });
-    // 폼 리셋 (날짜는 유지)
-    document.getElementById('swm-start').value = '';
-    document.getElementById('swm-end').value   = '';
-    document.getElementById('swm-zoom').value  = '';
-    document.getElementById('swm-cap').value   = '3';
-    document.getElementById('swm-note').value  = '';
-    msgEl.textContent = '✓ 세션이 등록됐습니다!';
-    msgEl.style.color = 'var(--green)';
-    setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 3000);
-    // onSnapshot이 자동으로 목록 갱신
-  } catch (err) {
-    msgEl.textContent = '등록 오류: ' + err.message;
-    msgEl.style.color = 'var(--red)';
-  } finally {
-    btn.disabled = false; btn.textContent = '세션 등록';
-  }
-}
-
-// ── 예약하기 (학생) ────────────────────────────────────────────
-window.swmBook = async function (slotId) {
+// ── 예약 ──────────────────────────────────────────────────────
+window.swmBook = async function(slotId) {
   if (!currentUser || !currentUserProfile) return;
   const slot = studySlots.find(s => s.id === slotId);
   if (!slot) return;
+  const selectedSlots = (studentSlotSelections[slotId] || []).sort();
+  if (selectedSlots.length === 0) { alert('시간 슬롯을 선택해주세요.'); return; }
 
-  const bk = studyBookings[slotId] || [];
-  if (bk.length >= slot.maxCapacity) { alert('이미 마감된 세션입니다.'); return; }
-  if (bk.some(b => b.studentUid === currentUser.uid)) { alert('이미 예약된 세션입니다.'); return; }
+  // 용량 체크
+  const maxPerSlot = slot.maxPerSlot || 99;
+  const overFull = selectedSlots.find(t => getSlotOccupancy(slotId, t) >= maxPerSlot);
+  if (overFull) { alert(`${overFull} 슬롯이 마감됐습니다. 다른 시간을 선택해주세요.`); return; }
 
-  // 버튼 즉시 비활성화 (중복 클릭 방지)
   const btn = document.querySelector(`[data-book="${slotId}"]`);
   if (btn) { btn.disabled = true; btn.textContent = '예약 중...'; }
 
   try {
     const bookingData = {
-      studentUid:   currentUser.uid,
-      studentName:  currentUserProfile.name || currentUser.email,
-      studentEmail: currentUser.email,
-      bookedAt:     serverTimestamp(),
+      studentUid:    currentUser.uid,
+      studentName:   currentUserProfile.name || currentUser.email,
+      studentEmail:  currentUser.email,
+      selectedSlots,
+      bookedAt:      serverTimestamp(),
     };
-    await setDoc(
-      doc(db, 'studySlots', slotId, 'bookings', currentUser.uid),
-      bookingData
-    );
+    await setDoc(doc(db, 'studySlots', slotId, 'bookings', currentUser.uid), bookingData);
 
-    // 로컬 상태 즉시 반영 (subcollection 변경은 onSnapshot 미감지)
+    // 로컬 상태 즉시 반영
     if (!studyBookings[slotId]) studyBookings[slotId] = [];
-    studyBookings[slotId].push({
-      id: currentUser.uid, ...bookingData,
-    });
+    studyBookings[slotId].push({ id: currentUser.uid, ...bookingData });
+    delete studentSlotSelections[slotId]; // 선택 초기화
     renderStudy();
 
-    // 이메일 발송 (비동기, 실패해도 예약 영향 없음)
+    // 이메일 (비동기, 실패해도 예약 완료)
+    const timeRange = fmtSlotRange(selectedSlots);
     const base = {
       session_date: fmtDate(slot.date),
-      session_time: fmtTime(slot.startTime, slot.endTime),
+      session_time: timeRange,
       zoom_link:    slot.zoomLink,
       session_note: slot.note || '—',
       action:       '예약 확인',
     };
-    sendStudyEmail(EMAILJS_TEMPLATE_STUDENT, {
-      ...base,
+    sendStudyEmail(EMAILJS_TEMPLATE_STUDENT, { ...base,
       to_email: currentUser.email,
       to_name:  currentUserProfile.name || currentUser.email,
     });
-    sendStudyEmail(EMAILJS_TEMPLATE_TEACHER, {
-      ...base,
+    sendStudyEmail(EMAILJS_TEMPLATE_TEACHER, { ...base,
       to_email:     TEACHER_EMAIL,
       student_name:  currentUserProfile.name || currentUser.email,
       student_email: currentUser.email,
@@ -1963,67 +2101,58 @@ window.swmBook = async function (slotId) {
   }
 };
 
-// ── 예약 취소 (학생 본인 / 선생님) ────────────────────────────
-window.swmCancel = async function (slotId, uid, studentName, isTeacherAction) {
+// ── 취소 ──────────────────────────────────────────────────────
+window.swmCancel = async function(slotId, uid, studentName, isTeacherAction) {
   const slot = studySlots.find(s => s.id === slotId);
   const msg  = isTeacherAction
     ? `${studentName} 학생의 예약을 취소하시겠습니까?`
     : '예약을 취소하시겠습니까?';
   if (!confirm(msg)) return;
-
   try {
     await deleteDoc(doc(db, 'studySlots', slotId, 'bookings', uid));
-    if (studyBookings[slotId]) {
+    if (studyBookings[slotId])
       studyBookings[slotId] = studyBookings[slotId].filter(b => b.studentUid !== uid);
-    }
     renderStudy();
 
-    // 학생이 직접 취소할 때만 이메일 발송
     if (!isTeacherAction && slot) {
+      const myBk = (studyBookings[slotId] || []).find(b => b.studentUid === uid);
+      const timeRange = fmtSlotRange(myBk?.selectedSlots || []);
       const base = {
         session_date: fmtDate(slot.date),
-        session_time: fmtTime(slot.startTime, slot.endTime),
+        session_time: timeRange,
         zoom_link:    slot.zoomLink,
         session_note: slot.note || '—',
         action:       '예약 취소 확인',
       };
-      sendStudyEmail(EMAILJS_TEMPLATE_STUDENT, {
-        ...base,
+      sendStudyEmail(EMAILJS_TEMPLATE_STUDENT, { ...base,
         to_email: currentUser.email,
         to_name:  currentUserProfile?.name || currentUser.email,
       });
-      sendStudyEmail(EMAILJS_TEMPLATE_TEACHER, {
-        ...base,
+      sendStudyEmail(EMAILJS_TEMPLATE_TEACHER, { ...base,
         to_email:     TEACHER_EMAIL,
         student_name:  currentUserProfile?.name || currentUser.email,
         student_email: currentUser.email,
         action:       '예약 취소 알림',
       });
     }
-  } catch (err) {
-    alert('취소 오류: ' + err.message);
-  }
+  } catch (err) { alert('취소 오류: ' + err.message); }
 };
 
-// ── 세션 삭제 (선생님) ─────────────────────────────────────────
-window.swmDeleteSlot = async function (slotId) {
+// ── 세션 삭제 ─────────────────────────────────────────────────
+window.swmDeleteSlot = async function(slotId) {
   if (!confirm('이 세션을 삭제하시겠습니까?\n예약한 학생들의 예약도 모두 취소됩니다.')) return;
   try {
-    const batch    = writeBatch(db);
-    const bookings = studyBookings[slotId] || [];
-    bookings.forEach(b =>
+    const batch = writeBatch(db);
+    (studyBookings[slotId] || []).forEach(b =>
       batch.delete(doc(db, 'studySlots', slotId, 'bookings', b.id))
     );
     batch.delete(doc(db, 'studySlots', slotId));
     await batch.commit();
-    // onSnapshot이 자동으로 상태/렌더 갱신
-  } catch (err) {
-    alert('삭제 오류: ' + err.message);
-  }
+  } catch (err) { alert('삭제 오류: ' + err.message); }
 };
 
-// ── 예약자 패널 토글 (선생님) ──────────────────────────────────
-window.swmToggleBookings = function (slotId) {
+// ── 예약자 패널 토글 ──────────────────────────────────────────
+window.swmToggleBookings = function(slotId) {
   const panel = document.getElementById('swm-panel-' + slotId);
   if (!panel) return;
   const isOpen = panel.style.display !== 'none';
