@@ -1593,11 +1593,11 @@ window.matDelete = async function (materialId, storagePath) {
 //   선생님 템플릿 변수: {{to_email}}, {{student_name}}, {{student_email}},
 //                       {{session_date}}, {{session_time}}, {{session_note}}, {{action}}
 //
-const EMAILJS_PUBLIC_KEY       = 'YOUR_PUBLIC_KEY';           // ← 교체하세요
-const EMAILJS_SERVICE_ID       = 'YOUR_SERVICE_ID';           // ← 교체하세요
-const EMAILJS_TEMPLATE_STUDENT = 'YOUR_STUDENT_TEMPLATE_ID'; // ← 교체하세요
-const EMAILJS_TEMPLATE_TEACHER = 'YOUR_TEACHER_TEMPLATE_ID'; // ← 교체하세요
-const TEACHER_EMAIL            = 'your@email.com';            // ← 교체하세요
+const EMAILJS_PUBLIC_KEY       = 'vhB9j4uaRQEObhaqp';
+const EMAILJS_SERVICE_ID       = 'service_fayibd9';
+const EMAILJS_TEMPLATE_STUDENT = 'template_o1ql2gl';
+const EMAILJS_TEMPLATE_TEACHER = 'template_ossvrgq';
+const TEACHER_EMAIL            = 'yeju.seol572@gmail.com';
 
 // ── EmailJS 초기화 + 발송 헬퍼 ─────────────────────────────────
 let _emailJsInit = false;
