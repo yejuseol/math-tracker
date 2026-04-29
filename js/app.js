@@ -619,6 +619,7 @@ function renderDashboard() {
     document.getElementById('recent-empty').textContent =
       currentRole === 'parent' ? '연결된 자녀 정보가 없습니다.' : '연결된 학생 정보가 없습니다.';
     document.getElementById('dash-sub').textContent = '—';
+    renderStageMap();
     return;
   }
 
@@ -680,7 +681,126 @@ function renderDashboard() {
       </tr>`;
     }).join('');
   }
+  renderStageMap();
 }
+
+// ══════════════════════════════════════════════════════════════
+// ── STAGE MAP ─────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+function renderStageMap() {
+  const wrap = document.getElementById('stage-map-wrap');
+  if (!wrap) return;
+
+  // 특정 학생이 선택된 경우에만 표시
+  const isTeacher = currentRole === 'teacher';
+  if (isTeacher && !currentStudentView) { wrap.innerHTML = ''; return; }
+  const studentId = currentStudentView;
+  if (!studentId) { wrap.innerHTML = ''; return; }
+
+  // 해당 학생 점수 전체
+  const stu = scores.filter(s => s.studentId === studentId);
+
+  // 점수 없음 → 안내 문구
+  if (stu.length === 0) {
+    wrap.innerHTML = `
+      <div class="stage-map">
+        <div class="stage-map-header">
+          <span class="stage-map-title">🗺️ My Stage Map</span>
+        </div>
+        <div class="empty-state" style="padding:1.5rem;text-align:center;font-size:13.5px">
+          아직 테스트 기록이 없어요. 첫 번째 스테이지에 도전해보세요! 🚀
+        </div>
+      </div>`;
+    return;
+  }
+
+  // 과목별 섹션 구성
+  const sections = [];
+  for (const subject of SUBJECTS) {
+    const chapters = COURSE_DATA[subject] || [];
+    if (!chapters.length) continue;
+
+    const subScores = stu.filter(s => s.subject === subject);
+
+    // 챕터별 스테이지 상태 계산
+    const stages = chapters.map((ch, idx) => {
+      const chScores = subScores.filter(s => s.chapter === ch.value);
+      if (chScores.length === 0) return { ch, status: 'LOCKED', bestPct: null, firstDate: null };
+      const bestPct   = Math.max(...chScores.map(s => Math.round(s.got / s.max * 100)));
+      const firstDate = [...chScores].sort((a, b) => (a.date||'').localeCompare(b.date||''))[0]?.date || '';
+      return { ch, status: bestPct >= 76 ? 'CLEARED' : 'ATTEMPTED', bestPct, firstDate };
+    });
+
+    // 테스트한 챕터가 하나도 없으면 이 과목 스킵
+    const tested = stages.filter(s => s.status !== 'LOCKED');
+    if (tested.length === 0) continue;
+
+    // 정렬: 테스트한 챕터(날짜 오름차순) → 미응시(커리큘럼 순서 유지)
+    tested.sort((a, b) => {
+      const d = (a.firstDate||'').localeCompare(b.firstDate||'');
+      return d !== 0 ? d : a.ch.label.localeCompare(b.ch.label);
+    });
+    const locked = stages.filter(s => s.status === 'LOCKED');
+
+    const cleared = stages.filter(s => s.status === 'CLEARED').length;
+    sections.push({ subject, stages: [...tested, ...locked], cleared, total: stages.length });
+  }
+
+  if (sections.length === 0) { wrap.innerHTML = ''; return; }
+
+  // 전체 통계
+  const totalCleared = sections.reduce((a, s) => a + s.cleared, 0);
+  const totalStages  = sections.reduce((a, s) => a + s.total,   0);
+  const pct = totalStages > 0 ? Math.round(totalCleared / totalStages * 100) : 0;
+  const multiSubject = sections.length > 1;
+
+  const sectionsHtml = sections.map(({ subject, stages, cleared, total }) => {
+    const cardsHtml = stages.map((stage, i) => {
+      const { ch, status, bestPct } = stage;
+      const icon    = status === 'CLEARED' ? '⭐' : status === 'ATTEMPTED' ? '🔁' : '🔒';
+      const pctTxt  = bestPct !== null ? bestPct + '%' : '미응시';
+      // 챕터명에서 접두어 제거 후 줄임
+      const shortName = ch.label.replace(/^[\w.]+\s*[\d.]*\s*—\s*/i, '').trim();
+      const truncated = shortName.length > 20 ? shortName.slice(0, 19) + '…' : shortName;
+      const isClickable = status !== 'LOCKED';
+      const safeSubject = subject.replace(/'/g, "\\'");
+      const attrs = isClickable
+        ? `onclick="navigateToStageStats('${safeSubject}','${studentId}')" style="cursor:pointer"`
+        : 'style="cursor:default"';
+      return `
+        <div class="stage-card stage-card--${status.toLowerCase()}" ${attrs}>
+          <div class="stage-icon">${icon}</div>
+          <div class="stage-name">${ch.value}</div>
+          <div class="stage-chapter" title="${ch.label}">${truncated}</div>
+          <div class="stage-pct">${pctTxt}</div>
+        </div>`;
+    }).join('');
+
+    return `
+      ${multiSubject ? `<div class="stage-subject-hdr">${subject} — ${cleared}/${total} 클리어</div>` : ''}
+      <div class="stage-cards">${cardsHtml}</div>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <div class="stage-map">
+      <div class="stage-map-header">
+        <span class="stage-map-title">🗺️ My Stage Map</span>
+        <span class="stage-map-summary">${totalCleared} / ${totalStages} 스테이지 클리어</span>
+      </div>
+      <div class="stage-progress-bar">
+        <div class="stage-progress-fill" style="width:${pct}%"></div>
+      </div>
+      ${sectionsHtml}
+    </div>`;
+}
+
+window.navigateToStageStats = function(subject, studentId) {
+  const studentSel = document.getElementById('stats-student-filter');
+  const subjectSel = document.getElementById('stats-subject-filter');
+  if (studentSel) studentSel.value = studentId || 'all';
+  if (subjectSel) subjectSel.value = subject;
+  showView('stats');
+};
 
 // ── SCORE FORM — SUBJECT / CHAPTER DROPDOWNS ──────────────────
 function populateSubjectDropdowns() {
