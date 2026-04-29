@@ -260,6 +260,8 @@ let matAdminFilter = 'all'; // 자료 관리 탭 과목 필터
 let studySlots     = [];
 let studyBookings  = {};   // { slotId: booking[] }
 let unsubStudySlots = null;
+let apScores        = [];
+let unsubApScores   = null;
 let currentRole        = 'teacher';
 let currentStudentView = null;
 let activeSubject = '';
@@ -486,6 +488,9 @@ function initApp() {
   // materials-admin nav: teacher only
   const navMatAdmin = document.querySelector('[data-view="materials-admin"]');
   if (navMatAdmin) navMatAdmin.style.display = role === 'teacher' ? '' : 'none';
+  // AP nav: teacher always; student/parent only if enrolled in AP (updated after students load)
+  const navAp = document.getElementById('nav-ap');
+  if (navAp) navAp.style.display = role === 'teacher' ? '' : 'none';
 
   setupFirestoreListeners();
   setTodayDates();
@@ -499,6 +504,7 @@ function setupFirestoreListeners() {
   if (unsubScores)     unsubScores();
   if (unsubMaterials)  unsubMaterials();
   if (unsubStudySlots) unsubStudySlots();
+  if (unsubApScores)   unsubApScores();
 
   unsubStudents = onSnapshot(collection(db, 'students'), snap => {
     students = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -518,6 +524,7 @@ function setupFirestoreListeners() {
     populateStatsFilter();
     renderStudents();
     renderDashboard();
+    updateApNavVisibility();
   });
 
   unsubScores = onSnapshot(collection(db, 'scores'), snap => {
@@ -541,10 +548,19 @@ function setupFirestoreListeners() {
   });
 
   setupStudyListeners();
+
+  unsubApScores = onSnapshot(collection(db, 'apScores'), snap => {
+    apScores = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Re-render AP view if it's currently active
+    const apView = document.getElementById('view-ap');
+    if (apView?.classList.contains('active')) renderApView();
+    // Re-render teacher results panel if it exists
+    if (currentRole === 'teacher') renderApTeacherResults();
+  });
 }
 
 // ── NAVIGATION ─────────────────────────────────────────────────
-const views = ['dashboard', 'add-score', 'students', 'stats', 'materials', 'materials-admin', 'study'];
+const views = ['dashboard', 'add-score', 'students', 'stats', 'materials', 'materials-admin', 'study', 'ap'];
 function showView(name) {
   views.forEach(v => {
     document.getElementById('view-' + v)?.classList.toggle('active', v === name);
@@ -558,6 +574,7 @@ function showView(name) {
   if (name === 'materials')        renderMaterials();
   if (name === 'materials-admin') { renderMaterialsAdmin(); initMaterialsUploadForm(); }
   if (name === 'study')            renderStudy();
+  if (name === 'ap')               renderApView();
 }
 document.querySelectorAll('[data-view]').forEach(el => {
   el.addEventListener('click', e => { e.preventDefault(); showView(el.dataset.view); });
@@ -2508,3 +2525,536 @@ window.swmToggleBookings = function(slotId) {
   const btn = document.querySelector(`#swmcard-${slotId} .swm-toggle-btn`);
   if (btn) btn.textContent = isOpen ? '예약자 ▾' : '예약자 ▴';
 };
+
+// ══════════════════════════════════════════════════════════════
+// ── AP MOCK EXAM ──────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+
+const AP_SUBJECTS = ['AP Precalculus', 'AP Calculus AB', 'AP Calculus BC'];
+
+const AP_EXAM_CONFIG = {
+  'AP Precalculus': {
+    mcq: [
+      { id: 'partA', label: 'Part A', note: '계산기 없이 (28문제)', total: 28 },
+      { id: 'partB', label: 'Part B', note: '계산기 허용 (12문제)', total: 12 },
+    ],
+    frq: [
+      { num: 1, label: 'FRQ 1', note: '계산기 허용', maxPts: 6 },
+      { num: 2, label: 'FRQ 2', note: '계산기 허용', maxPts: 6 },
+      { num: 3, label: 'FRQ 3', note: '계산기 없이', maxPts: 6 },
+      { num: 4, label: 'FRQ 4', note: '계산기 없이', maxPts: 6 },
+    ],
+    // (MCQ raw / 40) × 60 + (FRQ raw / 24) × 60 → max 120
+    calcComposite: (mcqRaw, frqRaw) =>
+      Math.round(((mcqRaw / 40) * 60 + (frqRaw / 24) * 60) * 10) / 10,
+    maxComposite: 120,
+    mcqWeightNote: '×1.5 → 최대 60점',
+    cutoffs: [
+      { grade: 5, min: 90 },
+      { grade: 4, min: 72 },
+      { grade: 3, min: 52 },
+      { grade: 2, min: 33 },
+      { grade: 1, min: 0  },
+    ],
+  },
+  'AP Calculus AB': {
+    mcq: [
+      { id: 'partA', label: 'Part A', note: '계산기 없이 (30문제)', total: 30 },
+      { id: 'partB', label: 'Part B', note: '계산기 허용 (15문제)', total: 15 },
+    ],
+    frq: [
+      { num: 1, label: 'FRQ 1', note: '계산기 허용', maxPts: 9 },
+      { num: 2, label: 'FRQ 2', note: '계산기 허용', maxPts: 9 },
+      { num: 3, label: 'FRQ 3', note: '계산기 없이', maxPts: 9 },
+      { num: 4, label: 'FRQ 4', note: '계산기 없이', maxPts: 9 },
+      { num: 5, label: 'FRQ 5', note: '계산기 없이', maxPts: 9 },
+      { num: 6, label: 'FRQ 6', note: '계산기 없이', maxPts: 9 },
+    ],
+    // MCQ raw × 1.2 + FRQ raw → max 108
+    calcComposite: (mcqRaw, frqRaw) =>
+      Math.round((mcqRaw * 1.2 + frqRaw) * 10) / 10,
+    maxComposite: 108,
+    mcqWeightNote: '×1.2 → 최대 54점',
+    cutoffs: [
+      { grade: 5, min: 71 },
+      { grade: 4, min: 52 },
+      { grade: 3, min: 39 },
+      { grade: 2, min: 27 },
+      { grade: 1, min: 0  },
+    ],
+  },
+  'AP Calculus BC': {
+    mcq: [
+      { id: 'partA', label: 'Part A', note: '계산기 없이 (30문제)', total: 30 },
+      { id: 'partB', label: 'Part B', note: '계산기 허용 (15문제)', total: 15 },
+    ],
+    frq: [
+      { num: 1, label: 'FRQ 1', note: '계산기 허용', maxPts: 9 },
+      { num: 2, label: 'FRQ 2', note: '계산기 허용', maxPts: 9 },
+      { num: 3, label: 'FRQ 3', note: '계산기 없이', maxPts: 9 },
+      { num: 4, label: 'FRQ 4', note: '계산기 없이', maxPts: 9 },
+      { num: 5, label: 'FRQ 5', note: '계산기 없이', maxPts: 9 },
+      { num: 6, label: 'FRQ 6', note: '계산기 없이', maxPts: 9 },
+    ],
+    calcComposite: (mcqRaw, frqRaw) =>
+      Math.round((mcqRaw * 1.2 + frqRaw) * 10) / 10,
+    maxComposite: 108,
+    mcqWeightNote: '×1.2 → 최대 54점',
+    cutoffs: [
+      { grade: 5, min: 68 },
+      { grade: 4, min: 53 },
+      { grade: 3, min: 40 },
+      { grade: 2, min: 28 },
+      { grade: 1, min: 0  },
+    ],
+  },
+};
+
+// ── AP 등급 계산 헬퍼 ─────────────────────────────────────────
+function calcAPGrade(composite, subject) {
+  const cfg = AP_EXAM_CONFIG[subject];
+  if (!cfg) return null;
+  for (const c of cfg.cutoffs) {
+    if (composite >= c.min) return c.grade;
+  }
+  return 1;
+}
+function apGradeStars(grade) {
+  return '★'.repeat(grade || 0) + '☆'.repeat(5 - (grade || 0));
+}
+function apGradeColor(grade) {
+  if (grade >= 4) return 'var(--green)';
+  if (grade === 3) return 'var(--amber)';
+  return 'var(--red)';
+}
+function apGradeBg(grade) {
+  if (grade >= 4) return 'var(--green-bg)';
+  if (grade === 3) return 'var(--amber-bg)';
+  return 'var(--red-bg, #fee2e2)';
+}
+
+// ── AP 네비게이션 가시성 ──────────────────────────────────────
+function updateApNavVisibility() {
+  const navAp = document.getElementById('nav-ap');
+  if (!navAp) return;
+  if (currentRole === 'teacher') { navAp.style.display = ''; return; }
+  // student/parent: show only if enrolled in an AP subject
+  if (!currentStudentView) { navAp.style.display = 'none'; return; }
+  const st = students.find(s => s.id === currentStudentView);
+  const hasAP = (st?.subjects || []).some(s => AP_SUBJECTS.includes(s));
+  navAp.style.display = hasAP ? '' : 'none';
+}
+
+// ── AP 뷰 진입점 ─────────────────────────────────────────────
+function renderApView() {
+  const container = document.getElementById('ap-content');
+  if (!container) return;
+  updateApNavVisibility();
+
+  if (currentRole !== 'teacher') {
+    // Student / parent view
+    if (!currentStudentView) {
+      container.innerHTML = '<div class="unlinked-msg">연결된 학생 정보가 없습니다.</div>';
+      return;
+    }
+    const st = students.find(s => s.id === currentStudentView);
+    const apSubs = (st?.subjects || []).filter(s => AP_SUBJECTS.includes(s));
+    if (apSubs.length === 0) {
+      container.innerHTML = `
+        <div class="ap-no-subject">
+          수강 중인 AP 과목이 없습니다.<br>
+          <small>AP 과목 등록은 선생님에게 문의하세요.</small>
+        </div>`;
+      return;
+    }
+    renderApStudentResults(container, currentStudentView);
+    return;
+  }
+
+  // Teacher view
+  renderApTeacherView(container);
+}
+
+// ── 선생님: 입력 폼 + 기록 테이블 ────────────────────────────
+function renderApTeacherView(container) {
+  const today = new Date().toISOString().split('T')[0];
+  const studentOpts = ['<option value="">학생 선택…</option>',
+    ...students.map(s => `<option value="${s.id}">${s.name}</option>`)
+  ].join('');
+  const subjectOpts = AP_SUBJECTS.map(s => `<option value="${s}">${s}</option>`).join('');
+
+  container.innerHTML = `
+    <div class="form-card">
+      <div class="ap-form-header">AP 모의고사 점수 입력</div>
+
+      <div class="field-row">
+        <div class="field-group">
+          <label class="field-label">학생 <span class="req">*</span></label>
+          <select id="ap-student">${studentOpts}</select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">과목 <span class="req">*</span></label>
+          <select id="ap-subject">${subjectOpts}</select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field-group" style="flex:2">
+          <label class="field-label">시험 이름</label>
+          <input type="text" id="ap-exam-name" placeholder="예: Mock Exam 1, 학원 모의고사 3월" value="Mock Exam 1">
+        </div>
+        <div class="field-group">
+          <label class="field-label">날짜 <span class="req">*</span></label>
+          <input type="date" id="ap-date" value="${today}">
+        </div>
+      </div>
+
+      <div id="ap-form-sections"></div>
+
+      <div class="ap-composite-bar" id="ap-composite-bar" style="display:none">
+        <div class="ap-comp-row">
+          <div class="ap-comp-block">
+            <div class="ap-comp-label">MCQ 정답 가중치</div>
+            <div class="ap-comp-val" id="ap-mcq-weighted">—</div>
+          </div>
+          <div class="ap-comp-sep">+</div>
+          <div class="ap-comp-block">
+            <div class="ap-comp-label">FRQ 합산</div>
+            <div class="ap-comp-val" id="ap-frq-raw">—</div>
+          </div>
+          <div class="ap-comp-sep">=</div>
+          <div class="ap-comp-block ap-comp-block--main">
+            <div class="ap-comp-label">Composite Score</div>
+            <div class="ap-comp-val ap-comp-total" id="ap-composite">—</div>
+          </div>
+        </div>
+        <div class="ap-grade-preview" id="ap-grade-preview">
+          <div class="ap-grade-label">예상 AP 등급</div>
+          <div class="ap-grade-display" id="ap-grade-display">—</div>
+          <div class="ap-cutoff-hint" id="ap-cutoff-hint"></div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn-primary" id="btn-save-ap">저장</button>
+        <div class="save-msg" id="ap-save-msg"></div>
+      </div>
+    </div>
+
+    <div id="ap-results-wrap"></div>
+  `;
+
+  renderApFormSections();
+  document.getElementById('ap-subject').addEventListener('change', () => {
+    renderApFormSections();
+  });
+  document.getElementById('btn-save-ap').addEventListener('click', saveApScore);
+  renderApTeacherResults();
+}
+
+// ── MCQ / FRQ 입력 섹션 렌더 ──────────────────────────────────
+function renderApFormSections() {
+  const subject = document.getElementById('ap-subject')?.value;
+  const cfg = AP_EXAM_CONFIG[subject];
+  const wrap = document.getElementById('ap-form-sections');
+  if (!wrap || !cfg) return;
+
+  const frqMaxTotal = cfg.frq.reduce((a, q) => a + q.maxPts, 0);
+
+  const mcqHtml = cfg.mcq.map(part => `
+    <div class="ap-input-row">
+      <div class="ap-input-info">
+        <span class="ap-input-label">${part.label}</span>
+        <span class="ap-input-note">${part.note}</span>
+      </div>
+      <div class="ap-input-right">
+        <input type="number" class="ap-num-input" id="ap-mcq-${part.id}"
+          min="0" max="${part.total}" value="0"
+          oninput="updateApCompositePreview()">
+        <span class="ap-input-max">/ ${part.total} 정답</span>
+      </div>
+    </div>`).join('');
+
+  const frqHtml = cfg.frq.map(q => `
+    <div class="ap-input-row">
+      <div class="ap-input-info">
+        <span class="ap-input-label">${q.label}</span>
+        <span class="ap-input-note">${q.note}</span>
+      </div>
+      <div class="ap-input-right">
+        <input type="number" class="ap-num-input" id="ap-frq-${q.num}"
+          min="0" max="${q.maxPts}" value="0"
+          oninput="updateApCompositePreview()">
+        <span class="ap-input-max">/ ${q.maxPts}점</span>
+      </div>
+    </div>`).join('');
+
+  wrap.innerHTML = `
+    <div class="ap-section-block">
+      <div class="ap-section-hdr">
+        <span>📝 Section I — MCQ (객관식)</span>
+        <span class="ap-section-weight">${cfg.mcqWeightNote}</span>
+      </div>
+      ${mcqHtml}
+    </div>
+    <div class="ap-section-block">
+      <div class="ap-section-hdr">
+        <span>✍️ Section II — FRQ (서술형)</span>
+        <span class="ap-section-weight">최대 ${frqMaxTotal}점</span>
+      </div>
+      ${frqHtml}
+    </div>
+  `;
+
+  document.getElementById('ap-composite-bar').style.display = '';
+  updateApCompositePreview();
+}
+
+// ── 실시간 Composite / 등급 미리보기 ─────────────────────────
+window.updateApCompositePreview = function () {
+  const subject = document.getElementById('ap-subject')?.value;
+  const cfg = AP_EXAM_CONFIG[subject];
+  if (!cfg) return;
+
+  let mcqRaw = 0;
+  cfg.mcq.forEach(p => {
+    mcqRaw += parseInt(document.getElementById(`ap-mcq-${p.id}`)?.value || 0, 10);
+  });
+  let frqRaw = 0;
+  cfg.frq.forEach(q => {
+    frqRaw += parseInt(document.getElementById(`ap-frq-${q.num}`)?.value || 0, 10);
+  });
+
+  const composite  = cfg.calcComposite(mcqRaw, frqRaw);
+  const grade      = calcAPGrade(composite, subject);
+  const mcqWeighted = subject === 'AP Precalculus'
+    ? Math.round((mcqRaw / 40) * 60 * 10) / 10
+    : Math.round(mcqRaw * 1.2 * 10) / 10;
+
+  document.getElementById('ap-mcq-weighted').textContent = mcqWeighted.toFixed(1);
+  document.getElementById('ap-frq-raw').textContent      = frqRaw;
+  document.getElementById('ap-composite').textContent    = composite.toFixed(1) + ' / ' + cfg.maxComposite;
+
+  const displayEl = document.getElementById('ap-grade-display');
+  const hintEl    = document.getElementById('ap-cutoff-hint');
+  if (grade) {
+    displayEl.innerHTML =
+      `<span class="ap-grade-num-big" style="color:${apGradeColor(grade)}">${grade}점</span>` +
+      `<span class="ap-grade-stars" style="color:${apGradeColor(grade)}">${apGradeStars(grade)}</span>`;
+    // Next grade threshold hint
+    const nextCutoff = cfg.cutoffs.find(c => c.grade === grade + 1);
+    if (nextCutoff) {
+      const diff = (nextCutoff.min - composite).toFixed(1);
+      hintEl.textContent = `다음 등급(${grade + 1}점)까지 +${diff}점`;
+    } else {
+      hintEl.textContent = grade === 5 ? '최고 등급 달성! 🎉' : '';
+    }
+  } else {
+    displayEl.textContent = '—';
+    hintEl.textContent = '';
+  }
+};
+
+// ── AP 점수 저장 ─────────────────────────────────────────────
+async function saveApScore() {
+  const studentId = document.getElementById('ap-student')?.value;
+  const subject   = document.getElementById('ap-subject')?.value;
+  const examName  = (document.getElementById('ap-exam-name')?.value || '').trim() || 'Mock Exam';
+  const date      = document.getElementById('ap-date')?.value;
+
+  if (!studentId) { showApMsg('학생을 선택해주세요.', 'red'); return; }
+  if (!date)      { showApMsg('날짜를 입력해주세요.', 'red'); return; }
+  const cfg = AP_EXAM_CONFIG[subject];
+  if (!cfg)       { showApMsg('지원하지 않는 과목입니다.', 'red'); return; }
+
+  const mcqRaw = {};
+  let mcqTotal = 0;
+  cfg.mcq.forEach(p => {
+    const v = Math.min(Math.max(parseInt(document.getElementById(`ap-mcq-${p.id}`)?.value || 0, 10), 0), p.total);
+    mcqRaw[p.id] = v;
+    mcqTotal += v;
+  });
+
+  const frqRaw = [];
+  let frqTotal = 0;
+  cfg.frq.forEach(q => {
+    const v = Math.min(Math.max(parseInt(document.getElementById(`ap-frq-${q.num}`)?.value || 0, 10), 0), q.maxPts);
+    frqRaw.push(v);
+    frqTotal += v;
+  });
+
+  const composite = cfg.calcComposite(mcqTotal, frqTotal);
+  const apGrade   = calcAPGrade(composite, subject);
+
+  const btn = document.getElementById('btn-save-ap');
+  btn.textContent = '저장 중…'; btn.disabled = true;
+
+  try {
+    await addDoc(collection(db, 'apScores'), {
+      studentId, subject, examName, date,
+      mcqRaw, frqRaw, mcqTotal, frqTotal,
+      compositeScore: composite,
+      apGrade,
+      createdBy: currentUser.uid,
+      createdAt: serverTimestamp(),
+    });
+    showApMsg('저장됐습니다!', 'green');
+    // Reset inputs to 0
+    cfg.mcq.forEach(p => { const el = document.getElementById(`ap-mcq-${p.id}`); if (el) el.value = 0; });
+    cfg.frq.forEach(q => { const el = document.getElementById(`ap-frq-${q.num}`);  if (el) el.value = 0; });
+    updateApCompositePreview();
+  } catch (err) {
+    showApMsg('저장 오류: ' + err.message, 'red');
+  }
+  btn.textContent = '저장'; btn.disabled = false;
+}
+
+function showApMsg(msg, color) {
+  const el = document.getElementById('ap-save-msg');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = color === 'red' ? 'var(--red)' : 'var(--green)';
+  setTimeout(() => { el.textContent = ''; }, 3000);
+}
+
+// ── AP 점수 삭제 ─────────────────────────────────────────────
+window.deleteApScore = async function (id) {
+  if (!confirm('이 AP 모의고사 기록을 삭제할까요?')) return;
+  try {
+    await deleteDoc(doc(db, 'apScores', id));
+  } catch (err) { alert('삭제 오류: ' + err.message); }
+};
+
+// ── 선생님: 기록 테이블 ───────────────────────────────────────
+function renderApTeacherResults() {
+  const wrap = document.getElementById('ap-results-wrap');
+  if (!wrap) return;
+
+  if (apScores.length === 0) {
+    wrap.innerHTML = `
+      <div class="section-title" style="margin-top:2rem">AP 모의고사 기록</div>
+      <div class="empty-state">저장된 AP 모의고사 기록이 없습니다.</div>`;
+    return;
+  }
+
+  const sorted = [...apScores].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  const rows = sorted.map(r => {
+    const st      = students.find(s => s.id === r.studentId);
+    const cfg     = AP_EXAM_CONFIG[r.subject];
+    const grade   = r.apGrade;
+    const comp    = typeof r.compositeScore === 'number' ? r.compositeScore.toFixed(1) : '—';
+    const maxComp = cfg?.maxComposite ?? '—';
+
+    // MCQ breakdown string
+    const mcqBreakdown = cfg ? cfg.mcq.map(p =>
+      `${p.label}: ${r.mcqRaw?.[p.id] ?? '—'}/${p.total}`
+    ).join(' · ') : '';
+    // FRQ breakdown string
+    const frqBreakdown = cfg ? cfg.frq.map((q, i) =>
+      `Q${q.num}: ${r.frqRaw?.[i] ?? '—'}/${q.maxPts}`
+    ).join(' · ') : '';
+
+    return `
+      <tr>
+        <td>${st ? st.name : '—'}</td>
+        <td><span class="ap-subject-tag">${r.subject}</span></td>
+        <td>${r.examName || '—'}</td>
+        <td>${r.date || '—'}</td>
+        <td>
+          <strong style="font-variant-numeric:tabular-nums">${comp}</strong>
+          <span style="color:var(--text-3);font-size:11px"> /${maxComp}</span>
+          <div style="font-size:10px;color:var(--text-3);margin-top:2px">${mcqBreakdown}</div>
+          <div style="font-size:10px;color:var(--text-3)">${frqBreakdown}</div>
+        </td>
+        <td>
+          <span class="ap-grade-badge" style="background:${apGradeBg(grade)};color:${apGradeColor(grade)}">
+            ${grade}점&nbsp;${apGradeStars(grade)}
+          </span>
+        </td>
+        <td>
+          <button class="btn-sm btn-danger-sm" onclick="deleteApScore('${r.id}')">삭제</button>
+        </td>
+      </tr>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <div class="section-title" style="margin-top:2rem">AP 모의고사 기록</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>학생</th><th>과목</th><th>시험명</th><th>날짜</th>
+          <th>Composite / 세부</th><th>AP 등급</th><th></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+// ── 학생: AP 결과 카드 뷰 ─────────────────────────────────────
+function renderApStudentResults(container, studentId) {
+  const myScores = apScores
+    .filter(r => r.studentId === studentId)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  if (myScores.length === 0) {
+    container.innerHTML = `
+      <div class="section-title">내 AP 모의고사 결과</div>
+      <div class="empty-state">
+        아직 AP 모의고사 기록이 없습니다.<br>
+        <span style="font-size:13px;color:var(--text-3)">선생님이 점수를 입력하면 여기에 표시됩니다.</span>
+      </div>`;
+    return;
+  }
+
+  // Group by subject
+  const bySubject = {};
+  myScores.forEach(r => {
+    if (!bySubject[r.subject]) bySubject[r.subject] = [];
+    bySubject[r.subject].push(r);
+  });
+
+  let html = '<div class="section-title">내 AP 모의고사 결과</div>';
+
+  for (const subject of AP_SUBJECTS) {
+    const rows = bySubject[subject];
+    if (!rows || rows.length === 0) continue;
+    const cfg = AP_EXAM_CONFIG[subject];
+
+    const cards = rows.map(r => {
+      const grade = r.apGrade;
+      const comp  = typeof r.compositeScore === 'number' ? r.compositeScore.toFixed(1) : '—';
+      return `
+        <div class="ap-result-card" style="border-color:${apGradeColor(grade)}20">
+          <div class="ap-rc-head">
+            <div>
+              <div class="ap-rc-name">${r.examName || '—'}</div>
+              <div class="ap-rc-date">${r.date || '—'}</div>
+            </div>
+            <div class="ap-rc-grade" style="background:${apGradeBg(grade)};color:${apGradeColor(grade)}">
+              <span class="ap-rc-grade-num">${grade}점</span>
+              <span class="ap-rc-stars">${apGradeStars(grade)}</span>
+            </div>
+          </div>
+          <div class="ap-rc-body">
+            <div class="ap-rc-comp">
+              <span class="ap-rc-comp-label">Composite</span>
+              <span class="ap-rc-comp-val">${comp}<span style="color:var(--text-3);font-size:11px"> /${cfg?.maxComposite}</span></span>
+            </div>
+            <div class="ap-rc-detail">
+              <span>MCQ ${r.mcqTotal ?? '—'}점</span>
+              <span style="color:var(--text-3)">·</span>
+              <span>FRQ ${r.frqTotal ?? '—'}점</span>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+
+    html += `
+      <div class="ap-subject-section">
+        <div class="ap-subject-hdr">${subject}</div>
+        <div class="ap-result-grid">${cards}</div>
+      </div>`;
+  }
+
+  container.innerHTML = html;
+}

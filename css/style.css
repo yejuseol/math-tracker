@@ -1158,3 +1158,228 @@ input[type=url]:focus, input[type=time]:focus {
   .stage-card { width: calc(50% - .625rem / 2); min-height: 80px; }
   .stage-map  { padding: 1rem 1rem 1.25rem; }
 }
+
+/* ════════════════════════════════════════════════════════════
+   AP MOCK EXAM
+   ════════════════════════════════════════════════════════════ */
+
+/* Form card header */
+.ap-form-header {
+  font-size: 15px; font-weight: 700; color: var(--text);
+  margin-bottom: 1.25rem; padding-bottom: .75rem;
+  border-bottom: 1.5px solid var(--border-md);
+  letter-spacing: -.01em;
+}
+
+/* Section block (MCQ / FRQ) */
+.ap-section-block {
+  background: var(--surface2);
+  border: 1px solid var(--border-md);
+  border-radius: var(--radius-sm);
+  padding: 1rem 1.125rem;
+  margin-bottom: .875rem;
+}
+.ap-section-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: .25rem;
+  font-size: 13px; font-weight: 700; color: var(--text);
+  margin-bottom: .875rem; padding-bottom: .5rem;
+  border-bottom: 1px solid var(--border-md);
+}
+.ap-section-weight {
+  font-size: 11px; font-weight: 600;
+  color: var(--accent-dark, #6d28d9);
+  background: var(--accent-light, #ede9fe);
+  border-radius: 99px; padding: 2px 9px;
+  white-space: nowrap;
+}
+
+/* Input row (one MCQ part or one FRQ question) */
+.ap-input-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .75rem; padding: .5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.ap-input-row:last-child { border-bottom: none; padding-bottom: 0; }
+.ap-input-info {
+  display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0;
+}
+.ap-input-label {
+  font-size: 13px; font-weight: 600; color: var(--text);
+}
+.ap-input-note {
+  font-size: 11px; color: var(--text-3);
+}
+.ap-input-right {
+  display: flex; align-items: center; gap: .5rem; flex-shrink: 0;
+}
+.ap-num-input {
+  width: 68px; padding: 5px 10px; text-align: center;
+  font-size: 15px; font-weight: 700; color: var(--text);
+  background: var(--surface); border: 1.5px solid var(--border-md);
+  border-radius: var(--radius-sm); outline: none;
+  transition: border-color .15s;
+}
+.ap-num-input:focus { border-color: var(--accent); }
+.ap-input-max {
+  font-size: 12px; color: var(--text-2); white-space: nowrap; min-width: 52px;
+}
+
+/* Composite score bar */
+.ap-composite-bar {
+  background: var(--surface2);
+  border: 1.5px solid var(--border-md);
+  border-radius: var(--radius-sm);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+.ap-comp-row {
+  display: flex; align-items: center; gap: .75rem;
+  flex-wrap: wrap;
+}
+.ap-comp-block {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: var(--surface); border: 1px solid var(--border-md);
+  border-radius: var(--radius-sm); padding: .5rem .875rem;
+  min-width: 80px;
+}
+.ap-comp-block--main {
+  background: var(--accent-light, #ede9fe);
+  border-color: var(--accent, #7c3aed);
+}
+.ap-comp-label {
+  font-size: 10px; font-weight: 600; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.ap-comp-val {
+  font-size: 16px; font-weight: 700; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.ap-comp-total { color: var(--accent, #7c3aed); }
+.ap-comp-sep {
+  font-size: 18px; font-weight: 700; color: var(--text-3);
+  flex-shrink: 0;
+}
+
+/* Grade preview inside composite bar */
+.ap-grade-preview {
+  display: flex; align-items: center; gap: .75rem;
+  flex-wrap: wrap; margin-top: .875rem;
+  padding-top: .75rem; border-top: 1px solid var(--border-md);
+}
+.ap-grade-label {
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+  white-space: nowrap;
+}
+.ap-grade-display {
+  display: flex; align-items: center; gap: .375rem;
+}
+.ap-grade-num-big {
+  font-size: 26px; font-weight: 800; line-height: 1;
+}
+.ap-grade-stars {
+  font-size: 15px; letter-spacing: 1px;
+}
+.ap-cutoff-hint {
+  font-size: 12px; color: var(--text-3);
+  margin-left: auto;
+}
+
+/* Results table — subject tag */
+.ap-subject-tag {
+  display: inline-block;
+  font-size: 11px; font-weight: 600; color: var(--accent-dark, #5b21b6);
+  background: var(--accent-light, #ede9fe);
+  border-radius: 4px; padding: 2px 7px;
+  white-space: nowrap;
+}
+
+/* Results table — grade badge */
+.ap-grade-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 13px; font-weight: 700;
+  padding: 3px 10px; border-radius: 99px;
+  white-space: nowrap;
+}
+
+/* No-subject state (student) */
+.ap-no-subject {
+  text-align: center; padding: 3rem 1rem;
+  font-size: 15px; font-weight: 600; color: var(--text-2);
+  line-height: 1.8;
+}
+.ap-no-subject small {
+  display: block; font-size: 13px; font-weight: 400; color: var(--text-3);
+  margin-top: .25rem;
+}
+
+/* ── Student result cards ── */
+.ap-subject-section { margin-bottom: 2rem; }
+.ap-subject-hdr {
+  font-size: 11px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-3);
+  margin-bottom: .75rem;
+}
+.ap-result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: .875rem;
+}
+.ap-result-card {
+  background: var(--surface);
+  border: 1.5px solid var(--border-md);
+  border-radius: var(--radius);
+  padding: 1rem 1.125rem;
+  transition: box-shadow .15s, transform .15s;
+}
+.ap-result-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+.ap-rc-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: .5rem; margin-bottom: .75rem;
+}
+.ap-rc-name {
+  font-size: 14px; font-weight: 700; color: var(--text);
+}
+.ap-rc-date {
+  font-size: 12px; color: var(--text-3); margin-top: 2px;
+}
+.ap-rc-grade {
+  display: flex; flex-direction: column; align-items: center;
+  border-radius: var(--radius-sm); padding: 6px 12px;
+  flex-shrink: 0;
+}
+.ap-rc-grade-num {
+  font-size: 20px; font-weight: 800; line-height: 1;
+}
+.ap-rc-stars {
+  font-size: 11px; letter-spacing: 1px; margin-top: 2px;
+}
+.ap-rc-body {
+  border-top: 1px solid var(--border); padding-top: .625rem;
+  display: flex; flex-direction: column; gap: .375rem;
+}
+.ap-rc-comp {
+  display: flex; align-items: baseline; gap: .375rem;
+}
+.ap-rc-comp-label {
+  font-size: 11px; font-weight: 600; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.ap-rc-comp-val {
+  font-size: 17px; font-weight: 700; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.ap-rc-detail {
+  display: flex; gap: .5rem;
+  font-size: 12px; color: var(--text-2);
+}
+
+@media (max-width: 520px) {
+  .ap-comp-row   { gap: .5rem; }
+  .ap-comp-block { min-width: 64px; padding: .375rem .5rem; }
+  .ap-comp-val   { font-size: 13px; }
+  .ap-result-grid { grid-template-columns: 1fr; }
+}
