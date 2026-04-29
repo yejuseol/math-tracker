@@ -971,6 +971,22 @@ input[type=url]:focus, input[type=time]:focus {
 .swm-time-kst   { font-size: 9.5px; opacity: .7; margin-top: 1px; font-weight: 500; color: inherit; letter-spacing: .01em; }
 .swm-time-occ   { font-size: 10.5px; opacity: .75; margin-top: 2px; font-weight: 500; }
 
+/* ── 시간대 선택 토글 (선생님 폼) ── */
+.swm-tz-toggle {
+  display: flex; border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm); overflow: hidden;
+  width: fit-content;
+}
+.swm-tz-opt {
+  padding: 7px 16px; font-size: 12.5px; font-weight: 600;
+  cursor: pointer; user-select: none; transition: background .15s, color .15s;
+  white-space: nowrap;
+}
+.swm-tz-opt input[type="radio"] { display: none; }
+.swm-tz-opt.active  { background: var(--accent); color: #fff; }
+.swm-tz-opt:not(.active) { background: var(--surface); color: var(--text-2); }
+.swm-tz-opt:not(.active):hover { background: var(--surface2); }
+
 /* ── 시간대 표시 (ET / KST) ── */
 .swm-et-label {
   font-size: .8em; font-weight: 600; opacity: .75;

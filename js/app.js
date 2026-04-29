@@ -1600,6 +1600,7 @@ const TEACHER_EMAIL            = 'yeju.seol572@gmail.com';
 // ── 추가 상태 ──────────────────────────────────────────────────
 let teacherSlotPreview    = [];   // 폼에서 생성 중인 슬롯 목록
 let studentSlotSelections = {};   // { slotId: string[] } 학생 토글 상태
+let teacherTzPref         = 'ET'; // 선생님 시간대 설정 ('ET' | 'KST')
 
 // ── EmailJS 헬퍼 ───────────────────────────────────────────────
 let _emailJsInit = false;
@@ -1671,12 +1672,35 @@ function toKST(dateStr, timeStr) {
   };
 }
 
+// KST 시간 → ET 변환 (KST−13h EDT / KST−14h EST)
+function toET(dateStr, timeStr) {
+  const offset = getETLabel(dateStr) === 'EDT' ? 13 : 14;
+  const [h, m] = timeStr.split(':').map(Number);
+  const totalMin = ((h * 60 + m - offset * 60) % (24 * 60) + 24 * 60) % (24 * 60);
+  const prevDay  = h * 60 + m - offset * 60 < 0;
+  return {
+    time: `${String(Math.floor(totalMin / 60)).padStart(2,'0')}:${String(totalMin % 60).padStart(2,'0')}`,
+    prevDay
+  };
+}
+
+// 슬롯 하나의 보조 시간대 문자열 반환 (버튼 안 작은 레이블용)
+function secondaryTZLabel(dateStr, timeStr, sourceTZ) {
+  if (sourceTZ === 'KST') {
+    const et = toET(dateStr, timeStr);
+    return `${et.prevDay ? '전날 ' : ''}${et.time} ${getETLabel(dateStr)}`;
+  }
+  const kst = toKST(dateStr, timeStr);
+  return `${kst.nextDay ? '+1일 ' : ''}${kst.time} KST`;
+}
+
 // 이메일용: 연속 슬롯은 범위로, 띄엄띄엄이면 개별 범위 나열 (plain text)
-// 예) 17:00,17:30,18:30 → "17:00–18:00 EDT → 06:00–07:00 KST(다음날), 18:30–19:00 EDT → 07:30–08:00 KST(다음날)"
-function fmtSlotListFull(slots, dateStr) {
+// sourceTZ: 'ET'(기본) | 'KST'
+function fmtSlotListFull(slots, dateStr, sourceTZ) {
   if (!slots || slots.length === 0) return '—';
+  const tz = sourceTZ || 'ET';
   const sorted = [...slots].sort();
-  const etLabel = dateStr ? getETLabel(dateStr) : '';
+  const srcLabel = tz === 'KST' ? 'KST' : (dateStr ? getETLabel(dateStr) : 'ET');
 
   // 연속된 슬롯 그룹핑
   const groups = [];
@@ -1696,30 +1720,47 @@ function fmtSlotListFull(slots, dateStr) {
   return groups.map(({ start, end }) => {
     const [eh, em] = end.split(':').map(Number);
     const endTotalMin = eh * 60 + em + 30;
-    const etEnd = `${String(Math.floor(endTotalMin/60)).padStart(2,'0')}:${String(endTotalMin%60).padStart(2,'0')}`;
-    const etStr = `${start}–${etEnd}${etLabel ? ' ' + etLabel : ''}`;
-    if (!dateStr) return etStr;
+    const slotEnd = `${String(Math.floor(endTotalMin/60)).padStart(2,'0')}:${String(endTotalMin%60).padStart(2,'0')}`;
+    const srcStr = `${start}–${slotEnd} ${srcLabel}`;
+    if (!dateStr) return srcStr;
+    if (tz === 'KST') {
+      const eS = toET(dateStr, start);
+      const eE = toET(dateStr, slotEnd);
+      const day = eS.prevDay ? '(전날)' : '';
+      return `${srcStr} → ${eS.time}–${eE.time} ${getETLabel(dateStr)}${day}`;
+    }
     const kS = toKST(dateStr, start);
-    const kE = toKST(dateStr, etEnd);
+    const kE = toKST(dateStr, slotEnd);
     const day = kS.nextDay ? '(다음날)' : '';
-    return `${etStr} → ${kS.time}–${kE.time} KST${day}`;
+    return `${srcStr} → ${kS.time}–${kE.time} KST${day}`;
   }).join(',  ');
 }
 
-// ET 슬롯 배열 → "17:00 – 18:30 EDT  06:00 – 07:30 KST" (HTML 반환)
-function fmtRangeWithTZ(slots, dateStr) {
+// 슬롯 배열 → HTML 범위 표시 (입력된 시간대 + 반대 시간대)
+// sourceTZ: 'ET'(기본) | 'KST'
+function fmtRangeWithTZ(slots, dateStr, sourceTZ) {
   if (!slots || slots.length === 0) return '—';
+  const tz = sourceTZ || 'ET';
   const sorted = [...slots].sort();
-  const first  = sorted[0];
-  const last   = sorted[sorted.length - 1];
+  const first = sorted[0];
+  const last  = sorted[sorted.length - 1];
   const [lh, lm] = last.split(':').map(Number);
-  const etEndMin = lh * 60 + lm + 30;
-  const etEnd  = `${String(Math.floor(etEndMin / 60)).padStart(2,'0')}:${String(etEndMin % 60).padStart(2,'0')}`;
-  const etLabel = getETLabel(dateStr);
-  const kstStart = toKST(dateStr, first);
-  const kstEnd   = toKST(dateStr, etEnd);
-  const dayNote  = kstStart.nextDay ? ' 다음날' : '';
-  return `${first} – ${etEnd} <span class="swm-et-label">${etLabel}</span><span class="swm-tz-kst">${dayNote} ${kstStart.time} – ${kstEnd.time} KST</span>`;
+  const endMin = lh * 60 + lm + 30;
+  const slotEnd = `${String(Math.floor(endMin / 60)).padStart(2,'0')}:${String(endMin % 60).padStart(2,'0')}`;
+
+  if (tz === 'KST') {
+    const eS = toET(dateStr, first);
+    const eE = toET(dateStr, slotEnd);
+    const etLabel = getETLabel(dateStr);
+    const dayNote = eS.prevDay ? ' 전날' : '';
+    return `${first} – ${slotEnd} <span class="swm-et-label">KST</span><span class="swm-tz-kst">${dayNote} ${eS.time} – ${eE.time} ${etLabel}</span>`;
+  }
+  // ET source
+  const etLabel  = getETLabel(dateStr);
+  const kS = toKST(dateStr, first);
+  const kE = toKST(dateStr, slotEnd);
+  const dayNote  = kS.nextDay ? ' 다음날' : '';
+  return `${first} – ${slotEnd} <span class="swm-et-label">${etLabel}</span><span class="swm-tz-kst">${dayNote} ${kS.time} – ${kE.time} KST</span>`;
 }
 
 function getSlotOccupancy(slotId, slotTime) {
@@ -1804,7 +1845,7 @@ function renderStudyTeacher(container) {
         const bookingItems = bk.map(b => {
           const safeId   = (b.studentUid||'').replace(/'/g,"\\'");
           const safeName = (b.studentName||'—').replace(/'/g,"\\'");
-          const timeRange = fmtRangeWithTZ(b.selectedSlots || [], s.date);
+          const timeRange = fmtRangeWithTZ(b.selectedSlots || [], s.date, s.timezone);
           return `
             <div class="swm-booking-row">
               <div class="swm-booking-avatar">${initials(b.studentName||b.studentEmail||'?')}</div>
@@ -1822,7 +1863,7 @@ function renderStudyTeacher(container) {
             <div class="swm-slot-inner">
               <div class="swm-slot-left">
                 <div class="swm-slot-date">${fmtDate(s.date)}</div>
-                <div class="swm-slot-time">${fmtRangeWithTZ(slots, s.date)}</div>
+                <div class="swm-slot-time">${fmtRangeWithTZ(slots, s.date, s.timezone)}</div>
                 ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
               </div>
               <div class="swm-slot-right">
@@ -1851,6 +1892,19 @@ function renderStudyTeacher(container) {
         <div class="field-group">
           <label class="field-label">날짜 <span class="req">*</span></label>
           <input type="date" id="swm-date" min="${today}" value="${today}">
+        </div>
+        <div class="field-group">
+          <label class="field-label">내 시간대</label>
+          <div class="swm-tz-toggle">
+            <label class="swm-tz-opt ${teacherTzPref === 'ET' ? 'active' : ''}">
+              <input type="radio" name="swm-tz" value="ET" ${teacherTzPref === 'ET' ? 'checked' : ''}>
+              🇺🇸 ET
+            </label>
+            <label class="swm-tz-opt ${teacherTzPref === 'KST' ? 'active' : ''}">
+              <input type="radio" name="swm-tz" value="KST" ${teacherTzPref === 'KST' ? 'checked' : ''}>
+              🇰🇷 KST
+            </label>
+          </div>
         </div>
         <div class="field-group">
           <label class="field-label">시작 시간 <span class="req">*</span></label>
@@ -1900,6 +1954,14 @@ function renderStudyTeacher(container) {
   // 이벤트 리스너
   document.getElementById('btn-swm-gen')?.addEventListener('click', swmGenerateSlotsFromForm);
   document.getElementById('btn-swm-save')?.addEventListener('click', saveStudySlot);
+  document.querySelectorAll('[name="swm-tz"]').forEach(r => {
+    r.addEventListener('change', e => {
+      teacherTzPref = e.target.value;
+      document.querySelectorAll('.swm-tz-opt').forEach(l =>
+        l.classList.toggle('active', l.querySelector('input').value === teacherTzPref)
+      );
+    });
+  });
 }
 
 function swmGenerateSlotsFromForm() {
@@ -1963,6 +2025,7 @@ async function saveStudySlot() {
       date,
       availableSlots: teacherSlotPreview,
       maxPerSlot: cap,
+      timezone: teacherTzPref,
       zoomLink: zoom, note,
       createdAt: serverTimestamp(), createdBy: currentUser.uid,
     });
@@ -2003,7 +2066,7 @@ function renderStudyStudent(container) {
         <div class="swm-my-card">
           <div class="swm-my-info">
             <div class="swm-slot-date">${fmtDate(s.date)}</div>
-            <div class="swm-slot-time">${fmtRangeWithTZ(bk.selectedSlots || [], s.date)}</div>
+            <div class="swm-slot-time">${fmtRangeWithTZ(bk.selectedSlots || [], s.date, s.timezone)}</div>
             ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
           </div>
           <div class="swm-my-actions">
@@ -2045,7 +2108,7 @@ function renderStudyStudent(container) {
         const full   = occ >= maxPerSlot;
         const picked = sel.includes(t);
         const myPick = isMyBooking && (myBk?.selectedSlots || []).includes(t);
-        const kst    = toKST(s.date, t);
+        const secTZ  = secondaryTZLabel(s.date, t, s.timezone || 'ET');
 
         let cls = 'swm-time-btn';
         if (myPick)       cls += ' my-pick';
@@ -2057,7 +2120,7 @@ function renderStudyStudent(container) {
           ${disabled ? 'disabled' : `onclick="swmToggleStudentSlot('${s.id}','${t}')"`}
           title="${occ}/${maxPerSlot}명">
           <span class="swm-time-label">${t}</span>
-          <span class="swm-time-kst">${kst.nextDay ? '+1일 ' : ''}${kst.time} KST</span>
+          <span class="swm-time-kst">${secTZ}</span>
           <span class="swm-time-occ">${occ}/${maxPerSlot}</span>
         </button>`;
       }).join('');
@@ -2065,7 +2128,7 @@ function renderStudyStudent(container) {
       // 선택 범위 요약
       const selRange = sel.length > 0
         ? `<div class="swm-sel-summary">
-             선택: <strong>${fmtRangeWithTZ(sel, s.date)}</strong>
+             선택: <strong>${fmtRangeWithTZ(sel, s.date, s.timezone)}</strong>
              (${sel.length * 30}분)
            </div>`
         : '';
@@ -2087,7 +2150,7 @@ function renderStudyStudent(container) {
             <div style="display:flex;justify-content:space-between;width:100%;flex-wrap:wrap;gap:.5rem">
               <div>
                 <div class="swm-slot-date">${fmtDate(s.date)}</div>
-                <div class="swm-slot-time">${fmtRangeWithTZ(slots, s.date)} 중 선택</div>
+                <div class="swm-slot-time">${fmtRangeWithTZ(slots, s.date, s.timezone)} 중 선택</div>
                 ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
               </div>
               ${isMyBooking
@@ -2157,7 +2220,7 @@ window.swmBook = async function(slotId) {
     // 이메일 (비동기, 실패해도 예약 완료)
     const base = {
       session_date: fmtDate(slot.date),
-      session_time: fmtSlotListFull(selectedSlots, slot.date),
+      session_time: fmtSlotListFull(selectedSlots, slot.date, slot.timezone),
       zoom_link:    slot.zoomLink,
       session_note: slot.note || '—',
       action:       '예약 확인',
@@ -2197,7 +2260,7 @@ window.swmCancel = async function(slotId, uid, studentName, isTeacherAction) {
     if (!isTeacherAction && slot) {
       const base = {
         session_date: fmtDate(slot.date),
-        session_time: fmtSlotListFull(cancelledBk?.selectedSlots || [], slot.date),
+        session_time: fmtSlotListFull(cancelledBk?.selectedSlots || [], slot.date, slot?.timezone),
         zoom_link:    slot.zoomLink,
         session_note: slot.note || '—',
         action:       '예약 취소 확인',
