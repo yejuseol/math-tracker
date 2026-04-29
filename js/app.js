@@ -2084,9 +2084,9 @@ function renderStudyStudent(container) {
   const uid   = currentUser?.uid;
   const upcoming = studySlots.filter(s => (s.date || '') >= today);
 
-  // ── 시간대 셀렉터 ──
+  // ── 시간대 셀렉터 (섹션 헤더 옆에 인라인 배치) ──
   const tzSelector = `
-    <div class="swm-tz-bar">
+    <div class="swm-tz-inline">
       <span class="swm-tz-bar-label">🕐 내 시간대</span>
       <select id="swm-student-tz" class="swm-tz-select">
         ${TZ_LIST.map(tz =>
@@ -2220,12 +2220,12 @@ function renderStudyStudent(container) {
   }
 
   container.innerHTML = `
-    ${tzSelector}
     ${mySection}
-    <div class="section-title" style="margin-top:${myBookedSlots.length?'2rem':'0'};margin-bottom:1rem">
-      예약 가능한 세션
+    <div class="swm-avail-header" style="margin-top:${myBookedSlots.length ? '2rem' : '0'}">
+      <div class="section-title" style="margin-bottom:0">예약 가능한 세션</div>
+      ${tzSelector}
     </div>
-    <div id="swm-avail-list">${availHtml}</div>
+    <div id="swm-avail-list" style="margin-top:1rem">${availHtml}</div>
   `;
 
   // 시간대 변경 이벤트
