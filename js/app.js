@@ -1602,6 +1602,17 @@ let teacherSlotPreview    = [];   // 폼에서 생성 중인 슬롯 목록
 let studentSlotSelections = {};   // { slotId: string[] } 학생 토글 상태
 let teacherTzPref         = 'ET'; // 선생님 시간대 설정 ('ET' | 'KST')
 
+// ── 지원 시간대 목록 ────────────────────────────────────────────
+const TZ_LIST = [
+  { id: 'KST', flag: '🇰🇷', name: 'KST (한국)',   utc:  9, dstUtc:  9 },
+  { id: 'JST', flag: '🇯🇵', name: 'JST (일본)',   utc:  9, dstUtc:  9 },
+  { id: 'ET',  flag: '🇺🇸', name: 'ET (동부)',    utc: -5, dstUtc: -4 },
+  { id: 'CT',  flag: '🇺🇸', name: 'CT (중부)',    utc: -6, dstUtc: -5 },
+  { id: 'MT',  flag: '🇺🇸', name: 'MT (산악)',    utc: -7, dstUtc: -6 },
+  { id: 'PT',  flag: '🇺🇸', name: 'PT (서부)',    utc: -8, dstUtc: -7 },
+];
+let studentTzPref = localStorage.getItem('swm_student_tz') || 'KST';
+
 // ── EmailJS 헬퍼 ───────────────────────────────────────────────
 let _emailJsInit = false;
 async function sendStudyEmail(templateId, params) {
@@ -1684,56 +1695,77 @@ function toET(dateStr, timeStr) {
   };
 }
 
-// 슬롯 하나의 보조 시간대 문자열 반환 (버튼 안 작은 레이블용)
-function secondaryTZLabel(dateStr, timeStr, sourceTZ) {
-  if (sourceTZ === 'KST') {
-    const et = toET(dateStr, timeStr);
-    return `${et.prevDay ? '전날 ' : ''}${et.time} ${getETLabel(dateStr)}`;
-  }
-  const kst = toKST(dateStr, timeStr);
-  return `${kst.nextDay ? '+1일 ' : ''}${kst.time} KST`;
+// ── 범용 시간대 변환 ───────────────────────────────────────────
+// DST 여부 (ET 로직 재사용)
+function isDST(dateStr) { return getETLabel(dateStr) === 'EDT'; }
+
+// 시간대 ID → UTC 오프셋(시간)
+function getOffset(tzId, dateStr) {
+  const tz = TZ_LIST.find(t => t.id === tzId);
+  if (!tz) return 0;
+  return (tz.utc === tz.dstUtc || !isDST(dateStr)) ? tz.utc : tz.dstUtc;
 }
 
-// 이메일용: 연속 슬롯은 범위로, 띄엄띄엄이면 개별 범위 나열 (plain text)
-// sourceTZ: 'ET'(기본) | 'KST'
+// 시간대 ID → 표시 레이블 ("EDT", "KST", "PDT" 등)
+function getTZLabel(tzId, dateStr) {
+  const dst = isDST(dateStr);
+  const labels = { KST:'KST', JST:'JST', ET: dst?'EDT':'EST', CT: dst?'CDT':'CST', MT: dst?'MDT':'MST', PT: dst?'PDT':'PST' };
+  return labels[tzId] || tzId;
+}
+
+// fromTZ의 timeStr → toTZ로 변환, {time, dayDiff(-1/0/1)} 반환
+function convertTime(dateStr, timeStr, fromTZ, toTZ) {
+  if (fromTZ === toTZ) return { time: timeStr, dayDiff: 0 };
+  const diff = (getOffset(toTZ, dateStr) - getOffset(fromTZ, dateStr)) * 60; // minutes
+  const [h, m] = timeStr.split(':').map(Number);
+  const total  = h * 60 + m + diff;
+  const wrapped = ((total % 1440) + 1440) % 1440;
+  return {
+    time: `${String(Math.floor(wrapped/60)).padStart(2,'0')}:${String(wrapped%60).padStart(2,'0')}`,
+    dayDiff: total < 0 ? -1 : total >= 1440 ? 1 : 0
+  };
+}
+
+// 학생 뷰: 슬롯 범위를 학생 TZ로 변환해 HTML 반환
+function fmtRangeForStudent(slots, dateStr, sourceTZ) {
+  if (!slots || slots.length === 0) return '—';
+  const srcTZ   = sourceTZ || 'ET';
+  const sorted  = [...slots].sort();
+  const first   = sorted[0];
+  const last    = sorted[sorted.length - 1];
+  const [lh, lm] = last.split(':').map(Number);
+  const srcEnd  = `${String(Math.floor((lh*60+lm+30)/60)).padStart(2,'0')}:${String((lh*60+lm+30)%60).padStart(2,'0')}`;
+  const cvS     = convertTime(dateStr, first,  srcTZ, studentTzPref);
+  const cvE     = convertTime(dateStr, srcEnd, srcTZ, studentTzPref);
+  const tgtLbl  = getTZLabel(studentTzPref, dateStr);
+  const srcLbl  = getTZLabel(srcTZ, dateStr);
+  const dayNote = cvS.dayDiff !== 0 ? (cvS.dayDiff > 0 ? ' 다음날' : ' 전날') : '';
+  if (srcTZ === studentTzPref)
+    return `${first} – ${srcEnd} <span class="swm-et-label">${srcLbl}</span>`;
+  return `${cvS.time} – ${cvE.time} <span class="swm-et-label">${tgtLbl}</span><span class="swm-tz-kst">${dayNote} ${first} – ${srcEnd} ${srcLbl}</span>`;
+}
+
+// 이메일용: 선택한 슬롯을 1개씩 나열 (병합 없음) — plain text
+// 예) ["15:00","16:30","18:00"] → 3줄 각각 출력
 function fmtSlotListFull(slots, dateStr, sourceTZ) {
   if (!slots || slots.length === 0) return '—';
-  const tz = sourceTZ || 'ET';
-  const sorted = [...slots].sort();
-  const srcLabel = tz === 'KST' ? 'KST' : (dateStr ? getETLabel(dateStr) : 'ET');
+  const srcTZ   = sourceTZ || 'ET';
+  const sorted  = [...slots].sort();
+  const otherTZ = srcTZ === 'KST' ? 'ET' : 'KST';
+  const srcLbl  = dateStr ? getTZLabel(srcTZ, dateStr)   : srcTZ;
+  const othLbl  = dateStr ? getTZLabel(otherTZ, dateStr) : otherTZ;
 
-  // 연속된 슬롯 그룹핑
-  const groups = [];
-  let gStart = sorted[0], gPrev = sorted[0];
-  for (let i = 1; i < sorted.length; i++) {
-    const [ph, pm] = gPrev.split(':').map(Number);
-    const [ch, cm] = sorted[i].split(':').map(Number);
-    if (ch * 60 + cm === ph * 60 + pm + 30) {
-      gPrev = sorted[i];
-    } else {
-      groups.push({ start: gStart, end: gPrev });
-      gStart = sorted[i]; gPrev = sorted[i];
-    }
-  }
-  groups.push({ start: gStart, end: gPrev });
-
-  return groups.map(({ start, end }) => {
-    const [eh, em] = end.split(':').map(Number);
-    const endTotalMin = eh * 60 + em + 30;
-    const slotEnd = `${String(Math.floor(endTotalMin/60)).padStart(2,'0')}:${String(endTotalMin%60).padStart(2,'0')}`;
-    const srcStr = `${start}–${slotEnd} ${srcLabel}`;
-    if (!dateStr) return srcStr;
-    if (tz === 'KST') {
-      const eS = toET(dateStr, start);
-      const eE = toET(dateStr, slotEnd);
-      const day = eS.prevDay ? '(전날)' : '';
-      return `${srcStr} → ${eS.time}–${eE.time} ${getETLabel(dateStr)}${day}`;
-    }
-    const kS = toKST(dateStr, start);
-    const kE = toKST(dateStr, slotEnd);
-    const day = kS.nextDay ? '(다음날)' : '';
-    return `${srcStr} → ${kS.time}–${kE.time} KST${day}`;
-  }).join(',  ');
+  return sorted.map(t => {
+    const [h, m] = t.split(':').map(Number);
+    const endMin = h * 60 + m + 30;
+    const tEnd   = `${String(Math.floor(endMin/60)).padStart(2,'0')}:${String(endMin%60).padStart(2,'0')}`;
+    const srcStr = `${t}–${tEnd} ${srcLbl}`;
+    if (!dateStr) return `• ${srcStr}`;
+    const cvS = convertTime(dateStr, t,    srcTZ, otherTZ);
+    const cvE = convertTime(dateStr, tEnd, srcTZ, otherTZ);
+    const day = cvS.dayDiff === 1 ? ' 다음날' : cvS.dayDiff === -1 ? ' 전날' : '';
+    return `• ${srcStr}  (${day.trim() ? day.trim() + ' ' : ''}${cvS.time}–${cvE.time} ${othLbl})`;
+  }).join('\n');
 }
 
 // 슬롯 배열 → HTML 범위 표시 (입력된 시간대 + 반대 시간대)
@@ -2052,7 +2084,18 @@ function renderStudyStudent(container) {
   const uid   = currentUser?.uid;
   const upcoming = studySlots.filter(s => (s.date || '') >= today);
 
-  // 내가 예약한 세션 (selectedSlots 있는 것)
+  // ── 시간대 셀렉터 ──
+  const tzSelector = `
+    <div class="swm-tz-bar">
+      <span class="swm-tz-bar-label">🕐 내 시간대</span>
+      <select id="swm-student-tz" class="swm-tz-select">
+        ${TZ_LIST.map(tz =>
+          `<option value="${tz.id}" ${studentTzPref === tz.id ? 'selected' : ''}>${tz.flag} ${tz.name}</option>`
+        ).join('')}
+      </select>
+    </div>`;
+
+  // 내가 예약한 세션
   const myBookedSlots = upcoming.flatMap(s => {
     const myBk = (studyBookings[s.id] || []).find(b => b.studentUid === uid);
     return myBk ? [{ session: s, booking: myBk }] : [];
@@ -2066,7 +2109,7 @@ function renderStudyStudent(container) {
         <div class="swm-my-card">
           <div class="swm-my-info">
             <div class="swm-slot-date">${fmtDate(s.date)}</div>
-            <div class="swm-slot-time">${fmtRangeWithTZ(bk.selectedSlots || [], s.date, s.timezone)}</div>
+            <div class="swm-slot-time">${fmtRangeForStudent(bk.selectedSlots || [], s.date, s.timezone)}</div>
             ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
           </div>
           <div class="swm-my-actions">
@@ -2098,6 +2141,7 @@ function renderStudyStudent(container) {
       const slots       = s.availableSlots || [];
       const maxPerSlot  = s.maxPerSlot || 99;
       const myBk        = bk.find(b => b.studentUid === uid);
+      const srcTZ       = s.timezone || 'ET';
 
       // 학생의 현재 선택 상태 복원 (re-render 시 유지)
       const sel = studentSlotSelections[s.id] || [];
@@ -2108,7 +2152,16 @@ function renderStudyStudent(container) {
         const full   = occ >= maxPerSlot;
         const picked = sel.includes(t);
         const myPick = isMyBooking && (myBk?.selectedSlots || []).includes(t);
-        const secTZ  = secondaryTZLabel(s.date, t, s.timezone || 'ET');
+
+        // 학생 TZ로 변환
+        const cv      = convertTime(s.date, t, srcTZ, studentTzPref);
+        const cvLabel = getTZLabel(studentTzPref, s.date);
+        const srcLbl  = getTZLabel(srcTZ, s.date);
+        const dayMark = cv.dayDiff === 1 ? '+1일 ' : cv.dayDiff === -1 ? '전날 ' : '';
+        // 학생 TZ = 선생님 TZ이면 원본 TZ 보조 레이블 불필요
+        const secLine = srcTZ !== studentTzPref
+          ? `<span class="swm-time-src">${t} ${srcLbl}</span>`
+          : '';
 
         let cls = 'swm-time-btn';
         if (myPick)       cls += ' my-pick';
@@ -2119,29 +2172,30 @@ function renderStudyStudent(container) {
         return `<button class="${cls}"
           ${disabled ? 'disabled' : `onclick="swmToggleStudentSlot('${s.id}','${t}')"`}
           title="${occ}/${maxPerSlot}명">
-          <span class="swm-time-label">${t}</span>
-          <span class="swm-time-kst">${secTZ}</span>
+          <span class="swm-time-label">${dayMark}${cv.time}</span>
+          <span class="swm-time-kst">${cvLabel}</span>
+          ${secLine}
           <span class="swm-time-occ">${occ}/${maxPerSlot}</span>
         </button>`;
       }).join('');
 
-      // 선택 범위 요약
+      // 선택 범위 요약 (학생 TZ 기준)
       const selRange = sel.length > 0
         ? `<div class="swm-sel-summary">
-             선택: <strong>${fmtRangeWithTZ(sel, s.date, s.timezone)}</strong>
+             선택: <strong>${fmtRangeForStudent(sel, s.date, srcTZ)}</strong>
              (${sel.length * 30}분)
            </div>`
         : '';
 
       const bookBtn = isMyBooking
-        ? '' // 이미 예약됨 → 위 "내 예약 현황"에서 처리
+        ? ''
         : sel.length === 0
           ? `<button class="btn-primary btn-sm" disabled style="opacity:.4;cursor:not-allowed">
                슬롯을 선택하세요
              </button>`
           : `<button class="btn-primary btn-sm" data-book="${s.id}"
                onclick="swmBook('${s.id}')">
-               예약하기 (${fmtSlotRange(sel)})
+               예약하기 (${sel.length}개 슬롯, ${sel.length * 30}분)
              </button>`;
 
       return `
@@ -2150,7 +2204,7 @@ function renderStudyStudent(container) {
             <div style="display:flex;justify-content:space-between;width:100%;flex-wrap:wrap;gap:.5rem">
               <div>
                 <div class="swm-slot-date">${fmtDate(s.date)}</div>
-                <div class="swm-slot-time">${fmtRangeWithTZ(slots, s.date, s.timezone)} 중 선택</div>
+                <div class="swm-slot-time">${fmtRangeForStudent(slots, s.date, srcTZ)} 중 선택</div>
                 ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
               </div>
               ${isMyBooking
@@ -2166,12 +2220,20 @@ function renderStudyStudent(container) {
   }
 
   container.innerHTML = `
+    ${tzSelector}
     ${mySection}
     <div class="section-title" style="margin-top:${myBookedSlots.length?'2rem':'0'};margin-bottom:1rem">
       예약 가능한 세션
     </div>
     <div id="swm-avail-list">${availHtml}</div>
   `;
+
+  // 시간대 변경 이벤트
+  document.getElementById('swm-student-tz')?.addEventListener('change', e => {
+    studentTzPref = e.target.value;
+    localStorage.setItem('swm_student_tz', studentTzPref);
+    renderStudy();
+  });
 }
 
 // ── 학생 슬롯 토글 ─────────────────────────────────────────────
