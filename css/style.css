@@ -968,7 +968,22 @@ input[type=url]:focus, input[type=time]:focus {
 }
 .swm-time-btn:disabled { cursor: default; }
 .swm-time-label { font-size: 13.5px; font-weight: 700; line-height: 1.2; }
+.swm-time-kst   { font-size: 9.5px; opacity: .7; margin-top: 1px; font-weight: 500; color: inherit; letter-spacing: .01em; }
 .swm-time-occ   { font-size: 10.5px; opacity: .75; margin-top: 2px; font-weight: 500; }
+
+/* ── 시간대 표시 (ET / KST) ── */
+.swm-et-label {
+  font-size: .8em; font-weight: 600; opacity: .75;
+  letter-spacing: .02em;
+}
+.swm-tz-kst {
+  font-size: .8em; font-weight: 500;
+  color: var(--text-3); margin-left: 6px;
+  white-space: nowrap;
+}
+.swm-slot-time .swm-tz-kst,
+.swm-my-info .swm-tz-kst  { display: block; margin-left: 0; margin-top: 2px; font-size: 12px; }
+.swm-sel-summary .swm-tz-kst { color: var(--accent-dark); opacity: .8; }
 
 /* ── 학생: 선택 범위 요약 ── */
 .swm-sel-summary {

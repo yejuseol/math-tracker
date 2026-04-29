@@ -1646,6 +1646,47 @@ function fmtDate(dateStr) {
   return `${dateStr} (${days[d.getDay()]})`;
 }
 
+// ── 시간대 헬퍼 (ET ↔ KST) ────────────────────────────────────
+// US DST: 3월 둘째 일요일(EDT 시작) ~ 11월 첫째 일요일(EST 복귀)
+function getETLabel(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  const year = d.getFullYear();
+  const mar1dow = new Date(year, 2, 1).getDay();
+  const firstSunMar = mar1dow === 0 ? 1 : 8 - mar1dow;
+  const dstStart = new Date(year, 2, firstSunMar + 7); // 3월 둘째 일요일
+  const nov1dow  = new Date(year, 10, 1).getDay();
+  const firstSunNov = nov1dow === 0 ? 1 : 8 - nov1dow;
+  const dstEnd   = new Date(year, 10, firstSunNov);    // 11월 첫째 일요일
+  return d >= dstStart && d < dstEnd ? 'EDT' : 'EST';
+}
+
+// ET 시간 → KST 변환 (EDT+13h / EST+14h)
+function toKST(dateStr, timeStr) {
+  const offset = getETLabel(dateStr) === 'EDT' ? 13 : 14;
+  const [h, m] = timeStr.split(':').map(Number);
+  const totalMin = h * 60 + m + offset * 60;
+  return {
+    time: `${String(Math.floor(totalMin / 60) % 24).padStart(2,'0')}:${String(totalMin % 60).padStart(2,'0')}`,
+    nextDay: totalMin >= 24 * 60
+  };
+}
+
+// ET 슬롯 배열 → "17:00 – 18:30 EDT  06:00 – 07:30 KST" (HTML 반환)
+function fmtRangeWithTZ(slots, dateStr) {
+  if (!slots || slots.length === 0) return '—';
+  const sorted = [...slots].sort();
+  const first  = sorted[0];
+  const last   = sorted[sorted.length - 1];
+  const [lh, lm] = last.split(':').map(Number);
+  const etEndMin = lh * 60 + lm + 30;
+  const etEnd  = `${String(Math.floor(etEndMin / 60)).padStart(2,'0')}:${String(etEndMin % 60).padStart(2,'0')}`;
+  const etLabel = getETLabel(dateStr);
+  const kstStart = toKST(dateStr, first);
+  const kstEnd   = toKST(dateStr, etEnd);
+  const dayNote  = kstStart.nextDay ? ' 다음날' : '';
+  return `${first} – ${etEnd} <span class="swm-et-label">${etLabel}</span><span class="swm-tz-kst">${dayNote} ${kstStart.time} – ${kstEnd.time} KST</span>`;
+}
+
 function getSlotOccupancy(slotId, slotTime) {
   return (studyBookings[slotId] || []).filter(b => (b.selectedSlots || []).includes(slotTime)).length;
 }
@@ -1728,7 +1769,7 @@ function renderStudyTeacher(container) {
         const bookingItems = bk.map(b => {
           const safeId   = (b.studentUid||'').replace(/'/g,"\\'");
           const safeName = (b.studentName||'—').replace(/'/g,"\\'");
-          const timeRange = fmtSlotRange(b.selectedSlots || []);
+          const timeRange = fmtRangeWithTZ(b.selectedSlots || [], s.date);
           return `
             <div class="swm-booking-row">
               <div class="swm-booking-avatar">${initials(b.studentName||b.studentEmail||'?')}</div>
@@ -1746,7 +1787,7 @@ function renderStudyTeacher(container) {
             <div class="swm-slot-inner">
               <div class="swm-slot-left">
                 <div class="swm-slot-date">${fmtDate(s.date)}</div>
-                <div class="swm-slot-time">${totalRange}</div>
+                <div class="swm-slot-time">${fmtRangeWithTZ(slots, s.date)}</div>
                 ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
               </div>
               <div class="swm-slot-right">
@@ -1927,7 +1968,7 @@ function renderStudyStudent(container) {
         <div class="swm-my-card">
           <div class="swm-my-info">
             <div class="swm-slot-date">${fmtDate(s.date)}</div>
-            <div class="swm-slot-time">${fmtSlotRange(bk.selectedSlots || [])}</div>
+            <div class="swm-slot-time">${fmtRangeWithTZ(bk.selectedSlots || [], s.date)}</div>
             ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
           </div>
           <div class="swm-my-actions">
@@ -1969,6 +2010,7 @@ function renderStudyStudent(container) {
         const full   = occ >= maxPerSlot;
         const picked = sel.includes(t);
         const myPick = isMyBooking && (myBk?.selectedSlots || []).includes(t);
+        const kst    = toKST(s.date, t);
 
         let cls = 'swm-time-btn';
         if (myPick)       cls += ' my-pick';
@@ -1980,6 +2022,7 @@ function renderStudyStudent(container) {
           ${disabled ? 'disabled' : `onclick="swmToggleStudentSlot('${s.id}','${t}')"`}
           title="${occ}/${maxPerSlot}명">
           <span class="swm-time-label">${t}</span>
+          <span class="swm-time-kst">${kst.nextDay ? '+1일 ' : ''}${kst.time} KST</span>
           <span class="swm-time-occ">${occ}/${maxPerSlot}</span>
         </button>`;
       }).join('');
@@ -1987,7 +2030,7 @@ function renderStudyStudent(container) {
       // 선택 범위 요약
       const selRange = sel.length > 0
         ? `<div class="swm-sel-summary">
-             선택: <strong>${fmtSlotRange(sel)}</strong>
+             선택: <strong>${fmtRangeWithTZ(sel, s.date)}</strong>
              (${sel.length * 30}분)
            </div>`
         : '';
@@ -2009,7 +2052,7 @@ function renderStudyStudent(container) {
             <div style="display:flex;justify-content:space-between;width:100%;flex-wrap:wrap;gap:.5rem">
               <div>
                 <div class="swm-slot-date">${fmtDate(s.date)}</div>
-                <div class="swm-slot-time">${fmtSlotRange(slots)} 중 선택</div>
+                <div class="swm-slot-time">${fmtRangeWithTZ(slots, s.date)} 중 선택</div>
                 ${s.note ? `<div class="swm-note">"${s.note}"</div>` : ''}
               </div>
               ${isMyBooking
