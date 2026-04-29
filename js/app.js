@@ -1671,6 +1671,41 @@ function toKST(dateStr, timeStr) {
   };
 }
 
+// 이메일용: 연속 슬롯은 범위로, 띄엄띄엄이면 개별 범위 나열 (plain text)
+// 예) 17:00,17:30,18:30 → "17:00–18:00 EDT → 06:00–07:00 KST(다음날), 18:30–19:00 EDT → 07:30–08:00 KST(다음날)"
+function fmtSlotListFull(slots, dateStr) {
+  if (!slots || slots.length === 0) return '—';
+  const sorted = [...slots].sort();
+  const etLabel = dateStr ? getETLabel(dateStr) : '';
+
+  // 연속된 슬롯 그룹핑
+  const groups = [];
+  let gStart = sorted[0], gPrev = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    const [ph, pm] = gPrev.split(':').map(Number);
+    const [ch, cm] = sorted[i].split(':').map(Number);
+    if (ch * 60 + cm === ph * 60 + pm + 30) {
+      gPrev = sorted[i];
+    } else {
+      groups.push({ start: gStart, end: gPrev });
+      gStart = sorted[i]; gPrev = sorted[i];
+    }
+  }
+  groups.push({ start: gStart, end: gPrev });
+
+  return groups.map(({ start, end }) => {
+    const [eh, em] = end.split(':').map(Number);
+    const endTotalMin = eh * 60 + em + 30;
+    const etEnd = `${String(Math.floor(endTotalMin/60)).padStart(2,'0')}:${String(endTotalMin%60).padStart(2,'0')}`;
+    const etStr = `${start}–${etEnd}${etLabel ? ' ' + etLabel : ''}`;
+    if (!dateStr) return etStr;
+    const kS = toKST(dateStr, start);
+    const kE = toKST(dateStr, etEnd);
+    const day = kS.nextDay ? '(다음날)' : '';
+    return `${etStr} → ${kS.time}–${kE.time} KST${day}`;
+  }).join(',  ');
+}
+
 // ET 슬롯 배열 → "17:00 – 18:30 EDT  06:00 – 07:30 KST" (HTML 반환)
 function fmtRangeWithTZ(slots, dateStr) {
   if (!slots || slots.length === 0) return '—';
@@ -2120,10 +2155,9 @@ window.swmBook = async function(slotId) {
     renderStudy();
 
     // 이메일 (비동기, 실패해도 예약 완료)
-    const timeRange = fmtSlotRange(selectedSlots);
     const base = {
       session_date: fmtDate(slot.date),
-      session_time: timeRange,
+      session_time: fmtSlotListFull(selectedSlots, slot.date),
       zoom_link:    slot.zoomLink,
       session_note: slot.note || '—',
       action:       '예약 확인',
@@ -2152,17 +2186,18 @@ window.swmCancel = async function(slotId, uid, studentName, isTeacherAction) {
     : '예약을 취소하시겠습니까?';
   if (!confirm(msg)) return;
   try {
+    // 이메일용으로 삭제 전에 booking 데이터 저장
+    const cancelledBk = (studyBookings[slotId] || []).find(b => b.studentUid === uid);
+
     await deleteDoc(doc(db, 'studySlots', slotId, 'bookings', uid));
     if (studyBookings[slotId])
       studyBookings[slotId] = studyBookings[slotId].filter(b => b.studentUid !== uid);
     renderStudy();
 
     if (!isTeacherAction && slot) {
-      const myBk = (studyBookings[slotId] || []).find(b => b.studentUid === uid);
-      const timeRange = fmtSlotRange(myBk?.selectedSlots || []);
       const base = {
         session_date: fmtDate(slot.date),
-        session_time: timeRange,
+        session_time: fmtSlotListFull(cancelledBk?.selectedSlots || [], slot.date),
         zoom_link:    slot.zoomLink,
         session_note: slot.note || '—',
         action:       '예약 취소 확인',
